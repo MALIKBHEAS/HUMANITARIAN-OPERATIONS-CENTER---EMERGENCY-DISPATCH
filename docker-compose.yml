@@ -1,0 +1,131 @@
+# =============================================================================
+# EOA Global (Emergency Orchestrator Agent) - Full Stack Docker Orchestration
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # 1. PostGIS Geospatial Database Engine
+  # ---------------------------------------------------------------------------
+  postgis:
+    image: postgis/postgis:16-3.4
+    container_name: eoa-postgis-db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_DB: eoa_global_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - eoa_postgis_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d eoa_global_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - eoa_network
+
+  # ---------------------------------------------------------------------------
+  # 2. Redis Message Broker & Real-Time Event Bus
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: eoa-redis-broker
+    restart: always
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - eoa_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - eoa_network
+
+  # ---------------------------------------------------------------------------
+  # 3. EOA Global FastAPI Backend (Multi-Tenancy, PostGIS, JWT, LangChain)
+  # ---------------------------------------------------------------------------
+  backend:
+    build:
+      context: ./eoa_global_backend
+      dockerfile: Dockerfile
+    container_name: eoa-backend-api
+    restart: always
+    depends_on:
+      postgis:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      POSTGRES_SERVER: postgis
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_DB: eoa_global_db
+      BROKER_TYPE: redis
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: eoa-enterprise-super-secret-key-change-in-production-2026-global
+      ALGORITHM: HS256
+      ACCESS_TOKEN_EXPIRE_MINUTES: 1440
+      LLM_PROVIDER: openai
+      OPENAI_API_KEY: ""
+      LOCAL_LLM_BASE_URL: "http://ollama:11434/v1"
+      LOCAL_LLM_MODEL_NAME: "llama3.2"
+      PYTHONUNBUFFERED: "1"
+    ports:
+      - "8000:8000"
+    networks:
+      - eoa_network
+
+  # ---------------------------------------------------------------------------
+  # 4. EOA Global React 18 + Vite Frontend Dashboard (Nginx Production Reverse Proxy)
+  # ---------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./eoa_global_frontend
+      dockerfile: Dockerfile
+    container_name: eoa-frontend-dashboard
+    restart: always
+    depends_on:
+      - backend
+    ports:
+      - "3000:80"
+    networks:
+      - eoa_network
+
+  # ---------------------------------------------------------------------------
+  # 5. Optional On-Premise Sovereign LLM (Ollama / Local LLaMA)
+  # (Enable by running: docker compose --profile sovereign-ai up -d)
+  # ---------------------------------------------------------------------------
+  ollama:
+    image: ollama/ollama:latest
+    container_name: eoa-ollama-local
+    restart: always
+    profiles:
+      - sovereign-ai
+    ports:
+      - "11434:11434"
+    volumes:
+      - eoa_ollama_data:/root/.ollama
+    networks:
+      - eoa_network
+
+# -----------------------------------------------------------------------------
+# Persistent Volumes & Network Definitions
+# -----------------------------------------------------------------------------
+volumes:
+  eoa_postgis_data:
+    name: eoa_postgis_data
+  eoa_redis_data:
+    name: eoa_redis_data
+  eoa_ollama_data:
+    name: eoa_ollama_data
+
+networks:
+  eoa_network:
+    name: eoa_network
+    driver: bridge

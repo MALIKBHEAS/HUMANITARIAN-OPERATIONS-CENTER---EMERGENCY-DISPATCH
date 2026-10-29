@@ -1,0 +1,131 @@
+@import 'maplibre-gl/dist/maplibre-gl.css';
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-slate-950 text-slate-100 font-sans;
+  }
+}
+
+/* RTL Layout Enhancements */
+[dir="rtl"] {
+  font-family: 'Cairo', 'Inter', system-ui, sans-serif;
+  letter-spacing: normal;
+}
+
+[dir="ltr"] {
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+/* Custom Tactical Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0a0d14;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1f293d;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
+
+/* Tactical Pulse Animation */
+@keyframes pulse-ring {
+  0% {
+    transform: scale(0.9);
+    opacity: 0.8;
+  }
+  50% {
+    transform: scale(1.6);
+    opacity: 0.1;
+  }
+  100% {
+    transform: scale(0.9);
+    opacity: 0.8;
+  }
+}
+
+.animate-pulse-ring {
+  animation: pulse-ring 2s infinite ease-in-out;
+}
+
+/* MapLibre Tactical Dark Theme Overrides */
+.maplibregl-canvas-container {
+  background: #020617 !important;
+}
+
+.maplibregl-popup-content {
+  background: #0f172a !important;
+  color: #ffffff !important;
+  border: 2px solid #334155 !important;
+  border-radius: 12px !important;
+  box-shadow: 0 20px 30px -10px rgba(0, 0, 0, 0.9) !important;
+  padding: 12px !important;
+}
+
+.maplibregl-popup-anchor-top .maplibregl-popup-tip {
+  border-bottom-color: #0f172a !important;
+}
+.maplibregl-popup-anchor-bottom .maplibregl-popup-tip {
+  border-top-color: #0f172a !important;
+}
+.maplibregl-popup-anchor-left .maplibregl-popup-tip {
+  border-right-color: #0f172a !important;
+}
+.maplibregl-popup-anchor-right .maplibregl-popup-tip {
+  border-left-color: #0f172a !important;
+}
+
+.maplibregl-popup-close-button {
+  color: #94a3b8 !important;
+  font-size: 16px !important;
+  padding: 4px 8px !important;
+}
+.maplibregl-popup-close-button:hover {
+  color: #ffffff !important;
+  background: transparent !important;
+}
+
+.maplibregl-ctrl-attrib {
+  background: rgba(15, 23, 42, 0.9) !important;
+  color: #94a3b8 !important;
+  font-family: inherit !important;
+  font-size: 10px !important;
+  padding: 2px 8px !important;
+  border-top-left-radius: 6px !important;
+}
+
+.maplibregl-ctrl-attrib a {
+  color: #38bdf8 !important;
+  text-decoration: none !important;
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: scale(0.98); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.2s ease-out forwards;
+}
+
+/* Mission Critical High-Contrast Print Styles */
+@media print {
+  header, footer, .maplibregl-ctrl, button {
+    display: none !important;
+  }
+  body, html {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+}

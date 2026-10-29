@@ -1,0 +1,127 @@
+{
+  "app": {
+    "title": "EOA Global",
+    "subtitle": "Emergency Orchestrator Agent",
+    "eoc": "Global Operations Center"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "active_tenant": "Tenant Partition",
+    "status": "System Status",
+    "online": "ONLINE",
+    "connected": "LIVE STREAM CONNECTED",
+    "connecting": "CONNECTING TO STREAM...",
+    "disconnected": "STREAM OFFLINE",
+    "logout": "Sign Out",
+    "language": "Language",
+    "trigger_sos": "Broadcast New SOS"
+  },
+  "auth": {
+    "login_title": "Command Center Authorization",
+    "login_subtitle": "Multi-Tenant Public Safety Access Point",
+    "email_label": "Operator Email",
+    "email_placeholder": "dispatcher@fema.gov",
+    "password_label": "Password",
+    "tenant_label": "Tenant Identifier",
+    "tenant_placeholder": "fema-us",
+    "sign_in_btn": "Authenticate Session",
+    "authenticating": "Verifying Credentials...",
+    "sso_title": "Federated Enterprise SSO Simulation",
+    "sso_desc": "Select a sovereign partner agency to simulate instant JIT authorization:",
+    "error_login": "Authentication failed. Check credentials or tenant ID."
+  },
+  "feed": {
+    "title": "Real-Time AI Incident Feed",
+    "live_badge": "LIVE AI STREAM",
+    "zero_hallucination": "Zero-Hallucination Verified",
+    "waiting_title": "Monitoring Global Emergency Frequency",
+    "waiting_desc": "Incoming SOS calls, webhooks, and sensor streams will appear here in real-time.",
+    "severity_label": "Severity",
+    "category_label": "Category",
+    "location_label": "Target Sector",
+    "dispatches_label": "Multi-Agency Mobilization",
+    "reasoning_label": "Tactical Reasoning",
+    "units_count": "{{count}} units ordered",
+    "casualties": "{{count}} Casualties Reported",
+    "focus_map": "Focus Map View"
+  },
+  "map": {
+    "title": "Tactical GIS Geospatial Layer",
+    "satellite": "OpenStreetMap Real-time",
+    "coordinates": "Coordinates",
+    "severity_level": "Level {{level}} / 5",
+    "flying_to": "Camera flying to target location...",
+    "dispatched_forces": "Mobilized Forces",
+    "low_detail_region": "Low Detail Region — High-detail regional map is not available here"
+  },
+  "agencies": {
+    "Police": "Police Forces",
+    "Hospital": "Emergency Medical (Hospital)",
+    "CivilDefense": "Civil Defense & Fire Suppression"
+  },
+  "categories": {
+    "Fire": "Fire & Explosion",
+    "Medical": "Trauma & Medical Emergency",
+    "Security": "Armed Threat & Security",
+    "Rescue": "Search, Rescue & Collapse"
+  },
+  "severities": {
+    "1": "Level 1: Minor Routine",
+    "2": "Level 2: Moderate",
+    "3": "Level 3: Urgent Warning",
+    "4": "Level 4: High Emergency",
+    "5": "Level 5: Catastrophic Mass-Casualty"
+  },
+  "modal": {
+    "title": "Trigger Emergency SOS Alert",
+    "desc": "Simulates an incoming distressed civilian phone call, radio transmission, or automated IoT sensor dispatch.",
+    "input_label": "Distress Message (Arabic, English, French, etc.)",
+    "input_placeholder": "Example: حريق ضخم في عمارة بشارع عمر المختار مع 3 مصابين...",
+    "quick_examples": "Quick Test Presets:",
+    "preset_fire_ar": "Arabic Fire (شارع عمر المختار)",
+    "preset_shooter_en": "English Active Shooter",
+    "preset_medical_ar": "Arabic Medical Emergency",
+    "send_btn": "Transmit SOS to Queue",
+    "cancel_btn": "Cancel"
+  },
+  "toolbar": {
+    "print_report": "Print Incident Report",
+    "share_coords": "Share Coordinates",
+    "activate_cctv": "Activate Nearby CCTV",
+    "active_focus": "ACTIVE TARGET",
+    "no_active_incident": "NO INCIDENT SELECTED",
+    "coords_copied": "Tactical Coordinates Copied to Clipboard!",
+    "status_ready": "MISSION CONTROL READY"
+  },
+  "routing": {
+    "nearest_hospital": "Nearest Hospital",
+    "nearest_police": "Nearest Police Station",
+    "autonomous_routing": "AUTONOMOUS SPATIAL ROUTING",
+    "eta": "ETA",
+    "distance": "Distance",
+    "hospital_label": "Emergency Hospital (Red Cross)",
+    "police_label": "Tactical Police Station (Command)",
+    "active_route": "Active Network Route"
+  },
+  "cctv": {
+    "modal_title": "Embedded Tactical CCTV Surveillance",
+    "feed_name": "CAM-042 [LIVE HD] - SECTOR ALPHA",
+    "status": "LIVE TELEMETRY - 1080P 60FPS",
+    "infrared": "Night Vision",
+    "thermal": "Thermal IR",
+    "optical": "Optical Color",
+    "close_btn": "Close Surveillance"
+  },
+  "report": {
+    "title": "EOC Tactical Incident Manifest",
+    "agency_header": "Global Emergency Orchestrator Dispatch",
+    "print_btn": "Print Official Report",
+    "close_btn": "Close"
+  },
+  "satellite": {
+    "commercial_active": "COMMERCIAL SATELLITE ACTIVE (HIGH RESOLUTION)",
+    "dev_eox_notice": "DEV ONLY: Sentinel-2 Cloudless (EOX Dual License / Non-Commercial)",
+    "dev_unlicensed_notice": "WARNING: UNLICENSED ESRI DEV LAYER - PROHIBITED IN PRODUCTION",
+    "unconfigured_notice": "SATELLITE FEED UNCONFIGURED (Commercial Key Required)"
+  }
+}

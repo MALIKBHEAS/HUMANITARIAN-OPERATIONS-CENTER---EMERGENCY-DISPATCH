@@ -1,0 +1,3 @@
+"""
+EOA Global - Core Package
+"""

@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>EOA Auth Seeder</title>
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const lang = params.get('lang') || 'en';
+    fetch('/api/v1/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'username=dispatcher%40fema.gov&password=password123&client_id=fema-us'
+    })
+    .then(r => r.json())
+    .then(data => {
+      localStorage.setItem('eoa_token', data.access_token);
+      localStorage.setItem('eoa_tenant_id', 'fema-us');
+      localStorage.setItem('i18nextLng', lang);
+      // redirect to root dashboard
+      setTimeout(() => {
+        window.location.href = '/';
+      }, 200);
+    })
+    .catch(err => {
+      document.body.innerText = 'Auth Error: ' + err;
+    });
+  </script>
+</head>
+<body style="background:#020617;color:#38bdf8;font-family:sans-serif;padding:20px;">
+  Authenticating EOA session...
+</body>
+</html>

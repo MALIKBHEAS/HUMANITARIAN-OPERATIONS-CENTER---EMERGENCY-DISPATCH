@@ -1,12 +1,13 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { WS_BASE_URL } from '../api';
 
 /**
  * Custom hook managing WebSocket live feed connection.
- * Connects to ws://127.0.0.1:8000/ws/live-feed when authenticated.
+ * Connects to ws://localhost:9443/ws/live-feed when authenticated.
  * Implements strict in-place deduplication on incident_id (max 50 items).
  */
-export function useWebSocket(url = 'ws://127.0.0.1:8000/ws/live-feed') {
+export function useWebSocket(url = WS_BASE_URL) {
   const { isAuthenticated } = useAuth();
   const [status, setStatus] = useState('DISCONNECTED'); // CONNECTING | CONNECTED | DISCONNECTED | ERROR
   const [latestIncident, setLatestIncident] = useState(null);

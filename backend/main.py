@@ -30,17 +30,28 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# 2. CORS Middleware
+# 2. CORS Middleware (Allows all origins for MVP / whitelists 49152 & 8000)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=[
+        "http://localhost:49152",
+        "http://127.0.0.1:49152",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "http://localhost:80",
+        "http://127.0.0.1:80",
+        "*",
+    ],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# 3. Include Routers
-app.include_router(webhook_router)
+# 3. Include Routers strictly with prefix="/api"
+app.include_router(webhook_router, prefix="/api", tags=["Incidents & Webhook"])
+app.include_router(webhook_router, tags=["Incidents & Webhook Direct Fallback"])
 
 # 4. Root Health Check
 @app.get("/", tags=["Health"])
@@ -54,23 +65,40 @@ def health_check():
     }
 
 # 5. Live WebSocket Feed for Operations Dashboard
-@app.websocket("/ws/live-feed")
-async def websocket_live_feed(websocket: WebSocket):
-    """
-    WebSocket endpoint connecting global frontend control centers
-    for live real-time push of AI dispatch events.
-    """
+async def _handle_backend_ws(websocket: WebSocket, tenant_id: str = "default"):
+    # Always accept immediately to prevent 403 Forbidden rejection
+    await websocket.accept()
     await ws_manager.connect(websocket)
+    try:
+        await websocket.send_json({
+            "type": "EOA_SOCKET_INITIALIZED",
+            "tenant_id": tenant_id,
+            "status": "ONLINE",
+            "message": "Connected to EOA Dispatch Feed"
+        })
+    except Exception:
+        pass
+
     try:
         while True:
             data = await websocket.receive_text()
             if data == "ping":
                 await websocket.send_text("pong")
+            elif '"type":"PING"' in data or '"type": "PING"' in data:
+                await websocket.send_json({"type": "HEARTBEAT_ACK", "status": "ALIVE"})
     except WebSocketDisconnect:
         ws_manager.disconnect(websocket)
     except Exception as exc:
         logger.warning(f"WebSocket client terminated: {exc}")
         ws_manager.disconnect(websocket)
+
+@app.websocket("/ws/live-feed")
+async def websocket_live_feed(websocket: WebSocket):
+    await _handle_backend_ws(websocket, tenant_id="default")
+
+@app.websocket("/ws/live-feed/{tenant_id}")
+async def websocket_live_feed_tenant(websocket: WebSocket, tenant_id: str):
+    await _handle_backend_ws(websocket, tenant_id=tenant_id)
 
 if __name__ == "__main__":
     import uvicorn

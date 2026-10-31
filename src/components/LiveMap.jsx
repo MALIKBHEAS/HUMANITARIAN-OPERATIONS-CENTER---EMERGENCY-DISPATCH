@@ -1,17 +1,18 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
-import { Shield, Navigation, Building2, Flame } from 'lucide-react';
+import { Shield, Navigation, Building2, Flame, Crosshair } from 'lucide-react';
+import { API_BASE_URL } from '../api';
 
 const DEFAULT_CENTER = [31.5326, 35.0998];
 
 // Preset Global Operations Sectors
 export const GLOBAL_SECTORS = [
-  { id: 'hebron', name: 'Hebron (الخليل)', center: [31.5326, 35.0998], zoom: 13 },
+  { id: 'hebron', name: 'Hebron (West Bank)', center: [31.5326, 35.0998], zoom: 13 },
   { id: 'tokyo', name: 'Tokyo (Shinjuku)', center: [35.6938, 139.6917], zoom: 13 },
   { id: 'madrid', name: 'Madrid (M-30)', center: [40.4816, -3.6872], zoom: 13 },
   { id: 'newyork', name: 'New York (Manhattan)', center: [40.7580, -73.9855], zoom: 13 },
-  { id: 'riyadh', name: 'Riyadh (الرياض)', center: [24.7136, 46.6753], zoom: 13 },
+  { id: 'riyadh', name: 'Riyadh (Central Sector)', center: [24.7136, 46.6753], zoom: 13 },
 ];
 
 // Auto-Focus helper component: smoothly flies camera to new incident GPS coordinates
@@ -75,7 +76,39 @@ const createPoliceIcon = (patrols) =>
     iconAnchor: [16, 16],
   });
 
-export default function LiveMap({ incidents = [], latestIncident = null }) {
+const createAcquiredTargetIcon = () =>
+  L.divIcon({
+    className: 'custom-pin-acquired-target',
+    html: `
+      <div class="relative flex items-center justify-center w-10 h-10">
+        <span class="absolute w-12 h-12 rounded-full border-2 border-red-500 animate-ping opacity-85"></span>
+        <div class="relative w-8 h-8 rounded-full bg-red-600 border-2 border-white flex items-center justify-center shadow-[0_0_20px_rgba(239,68,68,1)] text-white font-bold text-sm">
+          🎯
+        </div>
+      </div>
+    `,
+    iconSize: [40, 40],
+    iconAnchor: [20, 20],
+  });
+
+function TargetingHandler({ isTargetingMode, onLocationAcquired }) {
+  useMapEvents({
+    click(e) {
+      if (isTargetingMode && onLocationAcquired) {
+        onLocationAcquired({ lat: e.latlng.lat, lng: e.latlng.lng });
+      }
+    },
+  });
+  return null;
+}
+
+export default function LiveMap({
+  incidents = [],
+  latestIncident = null,
+  isTargetingMode = false,
+  onLocationAcquired = null,
+  acquiredCoords = null,
+}) {
   const [resources, setResources] = useState({ hospitals: [], police_stations: [] });
   const [selectedSector, setSelectedSector] = useState(GLOBAL_SECTORS[0]);
 
@@ -83,7 +116,7 @@ export default function LiveMap({ incidents = [], latestIncident = null }) {
   useEffect(() => {
     const loadResources = async () => {
       try {
-        const res = await fetch('http://127.0.0.1:8000/api/resources/all');
+        const res = await fetch(`${API_BASE_URL}/resources/all`);
         if (res.ok) {
           const data = await res.json();
           setResources({
@@ -107,15 +140,15 @@ export default function LiveMap({ incidents = [], latestIncident = null }) {
       // Default high-availability infrastructure dataset
       setResources({
         hospitals: [
-          { id: 101, name: 'Al-Ahli Hospital (المستشفى الأهلي)', location_lat: 31.5435, location_lon: 35.0872, icu_beds_available: 15, blood_units_available: 75, contact_info: '+970-2-222-7777' },
-          { id: 102, name: 'Princess Alia Hospital (مستشفى الأميرة عالية)', location_lat: 31.5310, location_lon: 35.1010, icu_beds_available: 6, blood_units_available: 35, contact_info: '+970-2-222-8888' },
+          { id: 101, name: 'Al-Ahli Hospital (North Sector)', location_lat: 31.5435, location_lon: 35.0872, icu_beds_available: 15, blood_units_available: 75, contact_info: '+970-2-222-7777' },
+          { id: 102, name: 'Princess Alia Hospital (Central Sector)', location_lat: 31.5310, location_lon: 35.1010, icu_beds_available: 6, blood_units_available: 35, contact_info: '+970-2-222-8888' },
           { id: 103, name: 'Tokyo Medical University Hospital', location_lat: 35.6948, location_lon: 139.6910, icu_beds_available: 24, blood_units_available: 120, contact_info: '+81-3-3342-6111' },
           { id: 104, name: 'Hospital Universitario La Paz (Madrid)', location_lat: 40.4816, location_lon: -3.6872, icu_beds_available: 18, blood_units_available: 95, contact_info: '+34-917-27-70-00' },
           { id: 105, name: 'NYU Langone Medical Center (New York)', location_lat: 40.7423, location_lon: -73.9741, icu_beds_available: 30, blood_units_available: 150, contact_info: '+1-212-263-7300' },
           { id: 106, name: 'King Faisal Specialist Hospital (Riyadh)', location_lat: 24.6712, location_lon: 46.6775, icu_beds_available: 20, blood_units_available: 110, contact_info: '+966-11-464-7272' },
         ],
         police_stations: [
-          { id: 201, name: 'Industrial Zone Police Post (الخليل)', location_lat: 31.5260, location_lon: 35.0960, patrols_available: 4, security_level: 'High', contact_info: '+970-2-229-8888' },
+          { id: 201, name: 'Industrial Zone Police Post (Hebron Sector)', location_lat: 31.5260, location_lon: 35.0960, patrols_available: 4, security_level: 'High', contact_info: '+970-2-229-8888' },
           { id: 202, name: 'Hebron Central Police Directorate', location_lat: 31.5285, location_lon: 35.0920, patrols_available: 8, security_level: 'Maximum', contact_info: '+970-2-229-9999' },
           { id: 203, name: 'Shinjuku Police Station (Tokyo)', location_lat: 35.6931, location_lon: 139.6932, patrols_available: 12, security_level: 'High', contact_info: '+81-3-3346-0110' },
           { id: 204, name: 'Comisaria Centro Madrid', location_lat: 40.4190, location_lon: -3.7050, patrols_available: 9, security_level: 'High', contact_info: '+34-913-22-34-00' },
@@ -201,12 +234,21 @@ export default function LiveMap({ incidents = [], latestIncident = null }) {
         </div>
       </div>
 
+      {/* Dynamic Targeting Mode Active Banner */}
+      {isTargetingMode && (
+        <div className="absolute top-14 left-1/2 -translate-x-1/2 z-[1000] px-4 py-1.5 bg-red-950/95 border-2 border-red-500 rounded text-red-300 font-mono text-xs font-black uppercase tracking-wider flex items-center gap-2 shadow-[0_0_20px_rgba(239,68,68,0.7)] animate-pulse pointer-events-none">
+          <Crosshair className="w-4 h-4 text-red-500 animate-spin" />
+          <span>TARGET ACQUISITION: CLICK MAP TO LOCK COORDINATES</span>
+        </div>
+      )}
+
       <MapContainer
         center={selectedSector.center}
         zoom={selectedSector.zoom}
         scrollWheelZoom={true}
-        className="w-full h-full"
+        className={`w-full h-full ${isTargetingMode ? 'cursor-crosshair' : ''}`}
       >
+        <TargetingHandler isTargetingMode={isTargetingMode} onLocationAcquired={onLocationAcquired} />
         {/* CRITICAL: Standard OpenStreetMap TileLayer (Familiar GPS Style - Zero API Key) */}
         <TileLayer
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -323,6 +365,22 @@ export default function LiveMap({ incidents = [], latestIncident = null }) {
             </Marker>
           );
         })}
+        {/* Dynamically Acquired Target Marker */}
+        {acquiredCoords && acquiredCoords.lat && acquiredCoords.lng && (
+          <Marker
+            position={[acquiredCoords.lat, acquiredCoords.lng]}
+            icon={createAcquiredTargetIcon()}
+          >
+            <Popup>
+              <div className="p-2 font-mono text-[11px] bg-slate-900 text-white rounded border border-red-500">
+                <div className="font-bold text-red-500 mb-1">TARGET LOCKED</div>
+                <div className="text-yellow-300 font-bold">
+                  {Number(acquiredCoords.lat).toFixed(6)}°N, {Number(acquiredCoords.lng).toFixed(6)}°E
+                </div>
+              </div>
+            </Popup>
+          </Marker>
+        )}
       </MapContainer>
     </div>
   );

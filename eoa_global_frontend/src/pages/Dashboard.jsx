@@ -1,10 +1,13 @@
-import React, { useState, useEffect } from 'react'
-import { useTranslation } from 'react-i18next'
+import React, { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { useLiveFeed } from '../hooks/useLiveFeed'
+import { useSystemHealth } from '../hooks/useSystemHealth'
 import { EnterpriseMap } from '../components/EnterpriseMap'
+import { CameraCoverageOverlay } from '../components/CameraCoverageOverlay'
+import { CCTVControlCenter, DEFAULT_CAMERAS } from '../components/CCTVControlCenter'
 import { AIIncidentFeed } from '../components/AIIncidentFeed'
-import { LanguageSwitcher } from '../components/LanguageSwitcher'
+import { TacticalConfirmModal } from '../components/TacticalConfirmModal'
+import { apiClient } from '../services/api'
 import {
   Radio,
   Building2,
@@ -13,930 +16,749 @@ import {
   X,
   AlertCircle,
   Activity,
-  Layers,
-  Sparkles,
   Flame,
   ShieldAlert,
   Printer,
   Share2,
   Video,
-  Eye,
-  Camera,
-  Compass,
   Check,
-  Crosshair,
-  Volume2,
-  ZoomIn,
-  ZoomOut,
-  RotateCcw,
-  ChevronUp,
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  Stethoscope,
-  Shield,
   MapPin,
+  Crosshair,
   Users,
+  Navigation,
+  Clock,
+  Compass,
+  AlertTriangle,
+  LocateFixed,
+  Shield,
+  Stethoscope,
+  Wifi,
+  ShieldCheck,
+  HeartPulse,
 } from 'lucide-react'
 
-// Demo Fallback Tactical Incident if no live incident has been broadcast yet
-const DEFAULT_TACTICAL_INCIDENT = {
-  id: 'INC-ALPHA-2026-081',
-  timestamp: new Date().toISOString(),
-  tenantId: 'eoa-global-hq',
-  location: 'شارع عمر المختار - القطاع المركزي الرئيسي',
-  latitude: 31.5125,
-  longitude: 34.4533,
-  classification: {
-    category: 'Fire',
-    severity_level: 4,
-    summary:
-      'حريق ضخم جداً في عمارة سكنية مع محاصرة السكان بالدخان ووجود مصابين ومخاطر انفجار غاز.',
-  },
-  dispatches: [
-    {
-      agency_type: 'CivilDefense',
-      units: 3,
-      reasoning: 'توجيه آليات الإطفاء ذات الضغط العالي وفرق الإنقاذ واقتحام المباني.',
-    },
-    {
-      agency_type: 'Hospital',
-      units: 2,
-      reasoning: 'استنفار سيارات الإسعاف المتقدمة ووحدات الإنعاش والفرز الطبي.',
-    },
-    {
-      agency_type: 'Police',
-      units: 2,
-      reasoning: 'تأمين المحيط الخارجي وإخلاء الشارع المحيط لتسهيل وصول مركبات الطوارئ.',
-    },
-  ],
-  summary: {
-    casualties: 4,
-  },
-}
-
-// Preset Emergency Scenarios with Global GPS Coordinates
-const DEMO_PRESETS = [
+// Professional Humanitarian Demo Incidents for EOC Datatable (Strict English Terminology)
+const DEFAULT_INCIDENTS = [
   {
-    id: 'gaza_fire',
-    labelAr: 'حريق غزة (شارع عمر المختار)',
-    labelEn: 'Gaza High-Rise Fire',
-    text: 'حريق ضخم جداً في عمارة سكنية بشارع عمر المختار مع وجود 4 مصابين محاصرين بالدخان ومخاطر انفجار أسطوانات الغاز!',
-    lat: 31.5125,
-    lng: 34.4533,
-    location: 'شارع عمر المختار - غزة',
-    category: 'Fire',
-    severity: 4,
-    casualties: 4,
+    id: 'INC-ALPHA-081',
+    timestamp: new Date().toISOString(),
+    tenantId: 'eoa-global-hq',
+    location: 'Omar Al-Mukhtar St - Central Sector',
+    latitude: 31.5125,
+    longitude: 34.4533,
+    classification: {
+      category: 'Fire',
+      severity_level: 3,
+      summary: 'Major structural fire in commercial/residential complex with trapped civilians, heavy smoke plume, and secondary hazards.',
+    },
+    status: 'ACTIVE DISPATCH',
     dispatches: [
-      { agency_type: 'CivilDefense', units: 3, reasoning: 'توجيه آليات الإطفاء ذات الضغط العالي وفرق الإنقاذ واقتحام المباني.' },
-      { agency_type: 'Hospital', units: 2, reasoning: 'استنفار سيارات الإسعاف المتقدمة ووحدات الإنعاش والفرز الطبي.' },
-      { agency_type: 'Police', units: 2, reasoning: 'تأمين المحيط الخارجي وإخلاء الشارع المحيط لتسهيل وصول مركبات الطوارئ.' },
+      { agency_type: 'CivilDefense', units: 3, reasoning: 'Directing high-pressure pump tenders and structural rescue teams.' },
+      { agency_type: 'Hospital', units: 2, reasoning: 'Mobilizing mobile trauma stabilization units and triage ambulances.' },
+      { agency_type: 'Police', units: 2, reasoning: 'Securing outer cordon perimeter and establishing emergency transit corridor.' },
     ],
   },
   {
-    id: 'ny_shooter',
-    labelAr: 'إطلاق نار (مانهاتن - نيويورك)',
-    labelEn: 'Midtown Manhattan Active Shooter',
-    text: 'Active shooter incident in Midtown Manhattan - Central District with casualties reported and armed suspect spotted on 5th Avenue!',
-    lat: 40.7128,
-    lng: -74.0060,
-    location: '5th Avenue, Midtown Manhattan - New York',
-    category: 'Security',
-    severity: 5,
-    casualties: 3,
+    id: 'INC-BETA-042',
+    timestamp: new Date(Date.now() - 15 * 60000).toISOString(),
+    tenantId: 'eoa-global-hq',
+    location: 'Salah Al-Din Corridor - South Sector',
+    latitude: 31.4285,
+    longitude: 34.3792,
+    classification: {
+      category: 'Rescue',
+      severity_level: 4,
+      summary: 'Multi-vehicle collision involving freight transport with trapped victims, severe trauma alerts, and transit corridor blockage.',
+    },
+    status: 'EN ROUTE',
     dispatches: [
-      { agency_type: 'Police', units: 6, reasoning: 'Tactical SWAT deployment, active shooter neutralization, and block lockdown.' },
-      { agency_type: 'Hospital', units: 4, reasoning: 'Trauma center casualty evacuation and rapid mobile triage staging.' },
-      { agency_type: 'CivilDefense', units: 2, reasoning: 'Structural safety perimeter and civilian evacuation escort.' },
+      { agency_type: 'Hospital', units: 4, reasoning: 'Transporting critical trauma casualties to nearest surgical facility.' },
+      { agency_type: 'Police', units: 3, reasoning: 'Managing transit flow and securing rapid emergency evacuation corridor.' },
     ],
   },
   {
-    id: 'tokyo_rescue',
-    labelAr: 'حريق وإنقاذ (طوكيو - شينجوكو)',
-    labelEn: 'Tokyo High-Rise Fire & Rescue',
-    text: 'حريق هائل واحتجاز مدنيين في برج سكني وتجاري بحي شينجوكو مع تصاعد الدخان الكثيف وانهيارات جزئية!',
-    lat: 35.6895,
-    lng: 139.6917,
-    location: 'Shinjuku Central - Tokyo',
-    category: 'Rescue',
-    severity: 4,
-    casualties: 2,
+    id: 'INC-GAMMA-019',
+    timestamp: new Date(Date.now() - 45 * 60000).toISOString(),
+    tenantId: 'eoa-global-hq',
+    location: 'Port Maritime Terminal - North Dock',
+    latitude: 31.5278,
+    longitude: 34.4312,
+    classification: {
+      category: 'Security',
+      severity_level: 2,
+      summary: 'Security perimeter breach alert and hydrocarbon leak inspection at terminal wharf. Civil protection on standby.',
+    },
+    status: 'STANDBY',
     dispatches: [
-      { agency_type: 'CivilDefense', units: 4, reasoning: 'Tokyo Fire Dept ladder trucks and high-rise evacuation team.' },
-      { agency_type: 'Hospital', units: 3, reasoning: 'Emergency critical care paramedics and smoke inhalation treatment.' },
-      { agency_type: 'Police', units: 2, reasoning: 'Traffic control and crowd management around Shinjuku station perimeter.' },
-    ],
-  },
-  {
-    id: 'gaza_medical',
-    labelAr: 'حادث سير جماعي (طريق صلاح الدين)',
-    labelEn: 'Mass Casualty Vehicle Collision',
-    text: 'حادث سير مروع واصطدام حافلة في طريق صلاح الدين مع 6 مصابين عالقين داخل المركبة وحالات نزيف خطيرة!',
-    lat: 31.5300,
-    lng: 34.4600,
-    location: 'طريق صلاح الدين الرئيسي',
-    category: 'Medical',
-    severity: 4,
-    casualties: 6,
-    dispatches: [
-      { agency_type: 'Hospital', units: 4, reasoning: 'استدعاء وحدات العناية المركزة المتنقلة ونقل المصابين لمجمع الشفاء الطبي.' },
-      { agency_type: 'CivilDefense', units: 2, reasoning: 'قص هياكل المركبات باستخدام أدوات الهيدروليك لإخراج العالقين.' },
-      { agency_type: 'Police', units: 2, reasoning: 'إغلاق مسار الطريق السريع وتوجيه حركة المرور للطرق الفرعية.' },
+      { agency_type: 'CivilDefense', units: 1, reasoning: 'Pre-positioning foam suppression systems for hydrocarbon hazards.' },
+      { agency_type: 'Police', units: 2, reasoning: 'Conducting wharf perimeter sweep and tactical cordon.' },
     ],
   },
 ]
 
 // =============================================================================
-// EMBEDDED TACTICAL SATELLITE CCTV STREAM COMPONENT
-// Renders live aerial imagery matching exact incident lat/lng with pan/tilt/zoom
-// and multi-spectral sensor filters (Optical, Thermal IR, Night-Vision Infrared)
+// HUMANITARIAN EMERGENCY OPERATIONS CENTER (EOC) DASHBOARD
 // =============================================================================
-const TacticalCCTVFeed = ({ incident, mode, isArabic }) => {
-  const [zoomScale, setZoomScale] = useState(1.4)
-  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 })
-  const [liveTime, setLiveTime] = useState(new Date().toISOString().replace('T', ' ').slice(0, 19))
+export const Dashboard = () => {
+  const { user, logout, tenantId } = useAuth()
+  const { incidents: liveIncidents, isConnected, connectionStatus, liveUnits, setLiveUnits } = useLiveFeed()
 
+  // Real-time Independent System Health Monitor
+  const systemHealth = useSystemHealth(connectionStatus || (isConnected ? 'connected' : 'disconnected'))
+
+  const incidents = liveIncidents && liveIncidents.length > 0
+    ? liveIncidents
+    : DEFAULT_INCIDENTS
+
+  const [activeIncident, setActiveIncident] = useState(incidents[0])
+  const [routingTelemetry, setRoutingTelemetry] = useState(null)
+  const [toastMessage, setToastMessage] = useState(null)
+
+  // Real-time UTC & Local Clock
+  const [currentTime, setCurrentTime] = useState('')
   useEffect(() => {
-    const timer = setInterval(() => {
-      setLiveTime(new Date().toISOString().replace('T', ' ').slice(0, 19))
-    }, 1000)
-    return () => clearInterval(timer)
+    const updateTime = () => {
+      const now = new Date()
+      const utcString = now.toISOString().slice(11, 19) + 'Z'
+      const locString = now.toLocaleTimeString('en-US', { hour12: false })
+      setCurrentTime(`UTC: ${utcString} | LOC: ${locString}`)
+    }
+    updateTime()
+    const interval = setInterval(updateTime, 1000)
+    return () => clearInterval(interval)
   }, [])
 
-  const lat = incident?.latitude || 31.5125
-  const lng = incident?.longitude || 34.4533
-
-  // Slippy tile math at zoom 17
-  const zoom = 17
-  const n = Math.pow(2, zoom)
-  const rad = (lat * Math.PI) / 180
-  const centerX = Math.floor(((lng + 180) / 360) * n)
-  const centerY = Math.floor(((1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2) * n)
-
-  // 3x3 adjacent tiles grid
-  const offsets = [
-    { dx: -1, dy: -1 }, { dx: 0, dy: -1 }, { dx: 1, dy: -1 },
-    { dx: -1, dy: 0 },  { dx: 0, dy: 0 },  { dx: 1, dy: 0 },
-    { dx: -1, dy: 1 },  { dx: 0, dy: 1 },  { dx: 1, dy: 1 },
-  ]
-
-  // Dynamic Multi-Spectral Visual Filters
-  const getFilterStyle = () => {
-    if (mode === 'thermal') {
-      return 'invert(100%) hue-rotate(190deg) contrast(180%) saturate(260%)'
-    }
-    if (mode === 'infrared') {
-      return 'grayscale(100%) sepia(100%) hue-rotate(90deg) saturate(350%) contrast(150%) brightness(85%)'
-    }
-    return 'contrast(115%) brightness(95%)'
-  }
-
-  return (
-    <div className="relative h-80 md:h-96 w-full bg-slate-950 overflow-hidden select-none">
-      {/* Sovereign Air-Gapped Tactical Sensor Surface */}
-      <div
-        className="absolute inset-0 flex items-center justify-center transition-transform duration-150 ease-out"
-        style={{
-          transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoomScale})`,
-          filter: getFilterStyle(),
-        }}
-      >
-        <div className="w-[768px] h-[768px] bg-slate-900 border border-cyan-500/30 flex items-center justify-center relative shadow-inner">
-          {/* Tactical coordinate grid */}
-          <div className="absolute inset-0 bg-[radial-gradient(#06b6d4_1px,transparent_1px)] [background-size:24px_24px] opacity-25" />
-          <div className="text-center font-mono text-cyan-400/80 p-6 rounded-xl bg-slate-950/80 border border-cyan-500/40 backdrop-blur-md">
-            <Radio className="w-10 h-10 mx-auto mb-2 text-cyan-400 animate-pulse" />
-            <div className="text-sm font-black tracking-widest uppercase">
-              {isArabic ? 'بث استطلاع تكتيكي جوي مشفر' : 'TACTICAL AIR-GAP SENSOR FEED'}
-            </div>
-            <div className="text-xs text-yellow-400 font-bold mt-1">
-              LAT: {lat.toFixed(5)}°N | LNG: {lng.toFixed(5)}°E
-            </div>
-            <div className="text-[10px] text-slate-400 mt-0.5">
-              SENSOR ID: FLIR-EOA-{incident?.id?.slice(-4) || '9921'} | ZOOM: {zoomScale.toFixed(1)}X
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Optical Scanlines & Sensor Vignette */}
-      <div className="absolute inset-0 bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.45)_50%)] bg-[length:100%_4px] pointer-events-none opacity-60" />
-      <div className="absolute inset-0 shadow-[inset_0_0_80px_rgba(0,0,0,0.85)] pointer-events-none" />
-
-      {/* Targeting Reticle & Tactical Crosshairs */}
-      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-        <div className="w-48 h-48 border border-cyan-400/30 rounded-full flex items-center justify-center">
-          <div className="w-32 h-32 border border-cyan-400/50 rounded-full border-dashed animate-spin" style={{ animationDuration: '30s' }} />
-        </div>
-        <div className="absolute w-12 h-12 border-2 border-red-500/80 flex items-center justify-center">
-          <div className="w-2 h-2 bg-red-500 rounded-full animate-ping" />
-        </div>
-        <div className="absolute w-64 h-px bg-cyan-400/40" />
-        <div className="absolute h-64 w-px bg-cyan-400/40" />
-        <div className="absolute top-10 left-10 w-6 h-6 border-t-2 border-l-2 border-cyan-400/80" />
-        <div className="absolute top-10 right-10 w-6 h-6 border-t-2 border-r-2 border-cyan-400/80" />
-        <div className="absolute bottom-10 left-10 w-6 h-6 border-b-2 border-l-2 border-cyan-400/80" />
-        <div className="absolute bottom-10 right-10 w-6 h-6 border-b-2 border-r-2 border-cyan-400/80" />
-      </div>
-
-      {/* Top Left HUD Telemetry */}
-      <div className="absolute top-3 start-3 text-[11px] font-mono text-cyan-300 space-y-0.5 drop-shadow-md bg-slate-950/75 p-2.5 rounded-xl border border-cyan-500/30 backdrop-blur-sm">
-        <p className="font-bold text-white flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-          UAV GIMBAL FEED // CAM-FLIR-01
-        </p>
-        <p>LAT: {lat.toFixed(5)}° N</p>
-        <p>LNG: {lng.toFixed(5)}° E</p>
-        <p>ALTITUDE: 142M AGL • AZ: 184° SSE</p>
-        <p className="text-yellow-400 font-bold">ZOOM: {zoomScale.toFixed(1)}X</p>
-      </div>
-
-      {/* Top Right Target Telemetry */}
-      <div className="absolute top-3 end-3 text-[11px] font-mono text-emerald-400 text-end drop-shadow-md bg-slate-950/75 p-2.5 rounded-xl border border-emerald-500/30 backdrop-blur-sm">
-        <p className="font-black text-white truncate max-w-[220px]">{incident?.location || 'Target Sector'}</p>
-        <p>MODE: {mode.toUpperCase()} // 60 FPS</p>
-        <p className="text-yellow-400 font-bold">{liveTime} UTC</p>
-        <p className="text-cyan-300 font-bold">STATUS: LOCKED</p>
-      </div>
-
-      {/* Bottom Center Pan/Tilt/Zoom In-Feed Joystick Controls */}
-      <div className="absolute bottom-3 start-1/2 -translate-x-1/2 flex items-center gap-2 bg-slate-950/90 px-3 py-1.5 rounded-2xl border border-slate-700 shadow-xl backdrop-blur-md">
-        <button
-          type="button"
-          onClick={() => setZoomScale((prev) => Math.max(1.0, prev - 0.2))}
-          className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-bold transition-all active:scale-95"
-          title="Zoom Out"
-        >
-          <ZoomOut className="w-4 h-4" />
-        </button>
-        <button
-          type="button"
-          onClick={() => setZoomScale((prev) => Math.min(3.0, prev + 0.2))}
-          className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-bold transition-all active:scale-95"
-          title="Zoom In"
-        >
-          <ZoomIn className="w-4 h-4" />
-        </button>
-
-        <div className="h-4 w-px bg-slate-700 mx-1" />
-
-        <button
-          type="button"
-          onClick={() => setPanOffset((prev) => ({ ...prev, y: prev.y + 25 }))}
-          className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-white active:scale-95"
-          title="Tilt Up"
-        >
-          <ChevronUp className="w-3.5 h-3.5" />
-        </button>
-        <button
-          type="button"
-          onClick={() => setPanOffset((prev) => ({ ...prev, y: prev.y - 25 }))}
-          className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-white active:scale-95"
-          title="Tilt Down"
-        >
-          <ChevronDown className="w-3.5 h-3.5" />
-        </button>
-        <button
-          type="button"
-          onClick={() => setPanOffset((prev) => ({ ...prev, x: prev.x + 25 }))}
-          className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-white active:scale-95"
-          title="Pan Left"
-        >
-          <ChevronLeft className="w-3.5 h-3.5" />
-        </button>
-        <button
-          type="button"
-          onClick={() => setPanOffset((prev) => ({ ...prev, x: prev.x - 25 }))}
-          className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-white active:scale-95"
-          title="Pan Right"
-        >
-          <ChevronRight className="w-3.5 h-3.5" />
-        </button>
-
-        <button
-          type="button"
-          onClick={() => {
-            setZoomScale(1.4)
-            setPanOffset({ x: 0, y: 0 })
-          }}
-          className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-yellow-400 font-bold active:scale-95"
-          title="Recenter"
-        >
-          <RotateCcw className="w-3.5 h-3.5" />
-        </button>
-      </div>
-    </div>
-  )
-}
-
-export const Dashboard = () => {
-  const { t, i18n } = useTranslation()
-  const isArabic = i18n.language?.startsWith('ar')
-  const { user, tenantId, logout } = useAuth()
-  const {
-    incidents: streamIncidents,
-    activeIncident: streamActiveIncident,
-    setActiveIncident,
-    addIncident,
-    connectionStatus,
-    triggerTestSOS,
-  } = useLiveFeed()
-
-  // Scenario selection via URL parameter (?scenario=ny_shooter or ?scenario=tokyo_rescue)
-  const scenarioParam = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('scenario') : null
-  const selectedPreset = DEMO_PRESETS.find((p) => p.id === scenarioParam)
-  const fallbackIncident = selectedPreset
-    ? {
-        id: `INC-DEMO-${selectedPreset.id.toUpperCase()}`,
-        timestamp: new Date().toISOString(),
-        tenantId: 'eoa-global-hq',
-        location: selectedPreset.location,
-        latitude: selectedPreset.lat,
-        longitude: selectedPreset.lng,
-        classification: {
-          category: selectedPreset.category,
-          severity_level: selectedPreset.severity,
-          summary: selectedPreset.text,
-        },
-        dispatches: selectedPreset.dispatches,
-        summary: { casualties: selectedPreset.casualties },
-      }
-    : DEFAULT_TACTICAL_INCIDENT
-
-  // Use stream incidents, or fallback to tactical incident to ensure immediate operational readiness
-  const incidents = streamIncidents.length > 0 ? streamIncidents : [fallbackIncident]
-  const activeIncident = streamActiveIncident || incidents[0]
-
-  // Modals state
-  const [isSOSModalOpen, setIsSOSModalOpen] = useState(false)
+  // Modals & Unified CCTV Control Center state
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false)
-  const [isCCTVModalOpen, setIsCCTVModalOpen] = useState(false)
-  const [cctvMode, setCctvMode] = useState('optical') // 'optical' | 'thermal' | 'infrared'
+  const [isCCTVControlCenterOpen, setIsCCTVControlCenterOpen] = useState(false)
+  const [cameras, setCameras] = useState(DEFAULT_CAMERAS)
+  const [activeCameraId, setActiveCameraId] = useState(DEFAULT_CAMERAS[0].id)
 
-  // Toast notification state
-  const [toastMessage, setToastMessage] = useState('')
+  // ===========================================================================
+  // TARGETING MODE & DYNAMIC COORDINATE CAPTURE STATE
+  // ===========================================================================
+  const [isTargetingMode, setIsTargetingMode] = useState(false)
+  const [pendingDispatchType, setPendingDispatchType] = useState('SOS_DURESS')
+  const [pendingSeverity, setPendingSeverity] = useState(5)
+  const [pendingTargetCoords, setPendingTargetCoords] = useState(null)
+  const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false)
+  const [isTransmitting, setIsTransmitting] = useState(false)
 
-  // SOS Form state & Selected Preset
-  const [selectedPresetId, setSelectedPresetId] = useState('gaza_fire')
-  const [targetCoords, setTargetCoords] = useState({ lat: 31.5125, lng: 34.4533 })
-  const [sosText, setSosText] = useState(
-    DEMO_PRESETS[0].text
-  )
-  const [isSubmitting, setIsSubmitting] = useState(false)
+  // Memoized routing telemetry handler to prevent cascading render loops
+  const handleRoutingResolved = useCallback((data) => {
+    setRoutingTelemetry((prev) => {
+      if (
+        prev &&
+        prev.hospitalName === data?.hospitalName &&
+        prev.distanceKm === data?.distanceKm &&
+        prev.etaMin === data?.etaMin
+      ) {
+        return prev
+      }
+      return data
+    })
+  }, [])
 
-  const showToast = (msg) => {
+  useEffect(() => {
+    if (incidents.length > 0 && !activeIncident) {
+      setActiveIncident(incidents[0])
+    }
+  }, [incidents, activeIncident])
+
+  const triggerToast = (msg) => {
     setToastMessage(msg)
-    setTimeout(() => setToastMessage(''), 3500)
+    setTimeout(() => setToastMessage(null), 3800)
   }
 
-  const handleSendSOS = async (e) => {
-    e.preventDefault()
-    if (!sosText.trim()) return
+  const handlePrintReport = () => setIsPrintModalOpen(true)
 
-    const activePreset = DEMO_PRESETS.find((p) => p.id === selectedPresetId)
-    const lat = targetCoords?.lat || (activePreset ? activePreset.lat : 31.5125)
-    const lng = targetCoords?.lng || (activePreset ? activePreset.lng : 34.4533)
-    const locationName = activePreset?.location || (isArabic ? 'القطاع التكتيكي للحادث' : 'Tactical Incident Sector')
-    const category = activePreset?.category || 'Fire'
-    const severity = activePreset?.severity || 4
-    const casualties = activePreset?.casualties || 2
-    const dispatches = activePreset?.dispatches || [
-      { agency_type: 'CivilDefense', units: 2, reasoning: 'Direct intervention units deployed.' },
-      { agency_type: 'Hospital', units: 2, reasoning: 'Emergency medical response dispatched.' },
-      { agency_type: 'Police', units: 1, reasoning: 'Perimeter cordoned.' },
-    ]
-
-    const incidentId = `INC-${Date.now().toString().slice(-6)}`
-    const newIncident = {
-      id: incidentId,
-      timestamp: new Date().toISOString(),
-      tenantId: tenantId || 'eoa-global-hq',
-      location: locationName,
-      latitude: lat,
-      longitude: lng,
-      classification: {
-        category,
-        severity_level: severity,
-        summary: sosText,
-      },
-      dispatches,
-      summary: {
-        casualties,
-      },
-    }
-
-    // 1. Immediately close popup to prevent operator workflow interruption
-    setIsSOSModalOpen(false)
-
-    // 2. Add directly to feed and focus camera
-    addIncident(newIncident)
-    setActiveIncident(newIncident)
-
-    // 3. User feedback toast
-    showToast(
-      isArabic
-        ? `تم توجيه المنظومة إلى: ${locationName} (${lat.toFixed(4)}°N, ${lng.toFixed(4)}°E)`
-        : `System Targeted: ${locationName} (${lat.toFixed(4)}°N, ${lng.toFixed(4)}°E)`
-    )
-
-    // 4. Background queue delivery
-    try {
-      await triggerTestSOS({
-        title: sosText.slice(0, 40) + '...',
-        description: sosText,
-        incident_type: category,
-        severity: severity >= 4 ? 'CRITICAL' : 'HIGH',
-        latitude: lat,
-        longitude: lng,
-      })
-    } catch (err) {
-      console.warn('Backend SOS queue dispatch note:', err)
-    }
-  }
-
-  // Action 1: Share Coordinates
   const handleShareCoordinates = () => {
-    if (!activeIncident) return
-    const lat = activeIncident.latitude.toFixed(5)
-    const lng = activeIncident.longitude.toFixed(5)
-    const textToCopy = `EOA GLOBAL INCIDENT [${activeIncident.id}]: Lat ${lat}, Lng ${lng} - Target: ${activeIncident.location}`
-
+    const lat = activeIncident?.latitude || activeIncident?.lat || 31.5125
+    const lng = activeIncident?.longitude || activeIncident?.lng || 34.4533
+    const text = `EOC-COORDS: ${lat.toFixed(6)}, ${lng.toFixed(6)} [${activeIncident?.location || 'Target Sector'}]`
     if (navigator.clipboard) {
-      navigator.clipboard.writeText(textToCopy)
+      navigator.clipboard.writeText(text)
+      triggerToast('INCIDENT COORDINATES COPIED TO CLIPBOARD')
+    } else {
+      triggerToast(text)
     }
-    showToast(
-      isArabic
-        ? `تم نسخ إحداثيات الهدف: (${lat}°N, ${lng}°E)`
-        : `Coordinates Transmitted: (${lat}°N, ${lng}°E)`
+  }
+
+  // Camera Management Handlers
+  const handleUpdateCamera = useCallback((updatedCam) => {
+    setCameras((prev) =>
+      prev.map((c) => (c.id === updatedCam.id ? { ...c, ...updatedCam } : c))
+    )
+  }, [])
+
+  const handleSelectCamera = useCallback((cam) => {
+    setActiveCameraId(cam.id)
+    setIsCCTVControlCenterOpen(true)
+  }, [])
+
+  // ===========================================================================
+  // CORE WORKFLOW OVERRIDE: LOCATION AFTER REQUEST
+  // Step 1: User clicks SOS or New Incident -> enters Targeting Mode
+  // ===========================================================================
+  const startTargetingWorkflow = (type = 'SOS_DURESS', severity = 5) => {
+    setPendingDispatchType(type)
+    setPendingSeverity(severity)
+    setIsTargetingMode(true)
+    triggerToast('TARGET ACQUISITION ACTIVE: CLICK MAP OR FETCH GPS TO LOCK COORDINATES')
+  }
+
+  // Step 2: Location dynamically captured from Map Click or Live GPS
+  const handleLocationAcquired = (coords, label = 'ACQUIRED TARGET GRID') => {
+    setPendingTargetCoords({
+      lat: coords.lat,
+      lng: coords.lng,
+      location: label,
+    })
+    setIsTargetingMode(false)
+    setIsConfirmModalOpen(true)
+  }
+
+  // Step 2-B: Fetch Live GPS from Navigator
+  const handleFetchGPS = () => {
+    if (!navigator.geolocation) {
+      triggerToast('GEOLOCATION NOT SUPPORTED: CLICK DIRECTLY ON TACTICAL MAP')
+      return
+    }
+    triggerToast('ACQUIRING LIVE OPERATOR GPS TELEMETRY...')
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        handleLocationAcquired(
+          { lat: pos.coords.latitude, lng: pos.coords.longitude },
+          'LIVE OPERATOR GPS POSITION'
+        )
+      },
+      (err) => {
+        triggerToast(`GPS ACQUISITION FAILED (${err.message}): CLICK MAP DIRECTLY`)
+      },
+      { enableHighAccuracy: true, timeout: 8000 }
     )
   }
 
-  // Action 2: Print Incident Report
-  const handlePrintReport = () => {
-    setIsPrintModalOpen(true)
-  }
+  // Step 3: Confirmation Modal Transmit Action -> Execute API Dispatch
+  const handleExecuteDispatch = async () => {
+    if (!pendingTargetCoords) return
+    setIsTransmitting(true)
 
-  // Action 3: Activate Nearby CCTV
-  const handleActivateCCTV = () => {
-    setIsCCTVModalOpen(true)
+    try {
+      const payload = {
+        type: pendingDispatchType || 'SOS_DURESS',
+        severity_level: pendingSeverity || 5,
+        description:
+          pendingDispatchType === 'SOS_DURESS'
+            ? 'CRITICAL OPERATOR DURESS / SOS BROADCAST - Autonomous emergency response units dispatched to target coordinates.'
+            : 'EMERGENCY DISPATCH - Rapid response forces deployed.',
+        lat: pendingTargetCoords.lat,
+        lon: pendingTargetCoords.lng,
+        required_beds: 5,
+        security_token: 'valid_token_c4isr_verified',
+      }
+
+      await apiClient.sendIncident(payload)
+      triggerToast('CRITICAL DISPATCH TRANSMITTED // UNITS MOBILIZED TO TARGET')
+      setIsConfirmModalOpen(false)
+      setPendingTargetCoords(null)
+    } catch (err) {
+      triggerToast(`TRANSMISSION ERROR: ${err.message}`)
+    } finally {
+      setIsTransmitting(false)
+    }
   }
 
   return (
     <div
-      dir={isArabic ? 'rtl' : 'ltr'}
-      className="flex flex-col h-screen w-screen bg-slate-950 text-white overflow-hidden font-sans select-none"
+      dir="ltr"
+      className="h-screen w-screen bg-[#07090e] text-slate-100 flex flex-col font-sans overflow-hidden select-none"
     >
       {/* ----------------------------------------------------------------- */}
-      {/* 1. TOP OPERATIONS HEADER (High-Contrast Tactical Bar)             */}
+      {/* 1. TOP HUMANITARIAN EOC COMMAND HEADER                            */}
       {/* ----------------------------------------------------------------- */}
-      <header className="h-14 bg-slate-900 border-b-2 border-slate-700 px-4 flex items-center justify-between shrink-0 z-20 shadow-xl">
-        {/* Brand & Tenant Identifier */}
-        <div className="flex items-center gap-3.5">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-cyan-500/20 border-2 border-cyan-400 flex items-center justify-center text-cyan-300 shadow-md">
-              <Radio className="w-5 h-5 animate-pulse" />
-            </div>
-            <div>
-              <span className="font-black text-base tracking-wider text-white uppercase block leading-tight">
-                {t('app.title')}
-              </span>
-              <span className="text-[10px] text-yellow-400 font-mono font-bold tracking-widest uppercase">
-                {t('app.eoc')}
-              </span>
-            </div>
+      <header className="h-12 bg-[#0c1017] border-b border-slate-800 px-3 sm:px-4 flex items-center justify-between shrink-0">
+        {/* Left: Operations Center Identification */}
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-red-950/80 border border-red-500/80 flex items-center justify-center text-red-400 shadow-sm shadow-red-950">
+            <Radio className="w-4 h-4 animate-pulse" />
           </div>
-
-          <div className="h-5 w-px bg-slate-700 mx-1 hidden sm:block" />
-
-          {/* Active Tenant Partition */}
-          <div className="flex items-center gap-2 px-3 py-1 rounded-lg bg-slate-950 border border-slate-700 text-xs">
-            <Building2 className="w-4 h-4 text-cyan-400 shrink-0" />
-            <span className="text-[11px] text-slate-300 uppercase font-bold tracking-wider">
-              {t('nav.active_tenant')}:
+          <div className="flex items-baseline gap-2">
+            <span className="font-bold text-white text-xs sm:text-sm tracking-wide uppercase">
+              HUMANITARIAN OPERATIONS CENTER // EMERGENCY DISPATCH
             </span>
-            <span className="font-mono font-black text-yellow-400 text-xs">{tenantId}</span>
+            <span className="hidden md:inline px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-slate-900 text-cyan-300 border border-cyan-800">
+              EOC LEVEL-1 READY
+            </span>
+            <span className="hidden lg:inline text-xs text-slate-400 font-mono">
+              TENANT: <span className="text-white font-bold">{tenantId || user?.tenant_id || 'HQ-COMMAND'}</span>
+            </span>
           </div>
         </div>
 
-        {/* Live Status, Language, and Controls */}
-        <div className="flex items-center gap-3">
-          {/* Live Telemetry Status Pill */}
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-950 border-2 border-slate-700 text-xs font-mono font-bold">
-            {connectionStatus === 'connected' ? (
-              <>
-                <span className="flex h-2.5 w-2.5 relative">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-80"></span>
-                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-                </span>
-                <span className="text-emerald-400 text-xs hidden md:inline">
-                  {t('nav.connected')}
-                </span>
-              </>
-            ) : (
-              <>
-                <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse"></span>
-                <span className="text-yellow-400 text-xs hidden md:inline">
-                  {t('nav.connecting')}
-                </span>
-              </>
+        {/* Center: Live Real-Time Clock Synchronization */}
+        <div className="hidden xl:flex items-center gap-2 text-xs font-mono font-bold text-slate-300 bg-slate-950 px-3 py-1 rounded-md border border-slate-800">
+          <Clock className="w-3.5 h-3.5 text-cyan-400" />
+          <span>{currentTime}</span>
+        </div>
+
+        {/* Right: Operational Health & Dispatch Triggers */}
+        <div className="flex items-center gap-2 sm:gap-3">
+          {/* Independent System Health Indicators */}
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            {/* Primary System Status */}
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-950 border border-slate-800 text-xs">
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  systemHealth.overallStatus === 'ONLINE'
+                    ? 'bg-emerald-400 animate-pulse'
+                    : systemHealth.overallStatus === 'DEGRADED'
+                    ? 'bg-amber-400 animate-ping'
+                    : 'bg-red-500'
+                }`}
+              />
+              <span className="text-slate-400 font-bold uppercase text-[10px]">SYS:</span>
+              <span
+                className={`font-black uppercase text-xs ${
+                  systemHealth.overallStatus === 'ONLINE'
+                    ? 'text-emerald-400'
+                    : systemHealth.overallStatus === 'DEGRADED'
+                    ? 'text-amber-300'
+                    : 'text-red-400'
+                }`}
+              >
+                {systemHealth.overallStatus}
+              </span>
+            </div>
+
+            {/* REST API Status & Latency */}
+            <div className="hidden md:flex items-center gap-1.5 px-2 py-1 rounded-md bg-slate-950 border border-slate-800 text-xs">
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${
+                  systemHealth.apiStatus === 'ONLINE' ? 'bg-emerald-400' : 'bg-red-500'
+                }`}
+              />
+              <span className="text-slate-400 text-[10px]">API:</span>
+              <span className="text-slate-200 font-bold text-xs">{systemHealth.apiStatus}</span>
+              {systemHealth.apiLatencyMs !== null && (
+                <span className="text-cyan-400 font-mono text-[11px]">({systemHealth.apiLatencyMs}ms)</span>
+              )}
+            </div>
+
+            {/* WebSocket Stream */}
+            <div className="hidden lg:flex items-center gap-1.5 px-2 py-1 rounded-md bg-slate-950 border border-slate-800 text-xs">
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${
+                  systemHealth.wsStatus === 'ONLINE' ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'
+                }`}
+              />
+              <span className="text-slate-400 text-[10px]">FEED:</span>
+              <span className="text-slate-200 font-bold text-xs">{systemHealth.wsStatus}</span>
+            </div>
+
+            {/* Last Sync */}
+            {systemHealth.lastSyncTime && (
+              <div className="hidden 2xl:flex items-center gap-1 px-2 py-1 rounded-md bg-slate-950 border border-slate-800 text-[11px] text-slate-400 font-mono">
+                <span>SYNC:</span>
+                <span className="text-slate-200">{systemHealth.lastSyncTime}</span>
+              </div>
             )}
           </div>
 
-          {/* Trigger Emergency SOS Modal Button */}
+          {/* New Incident Dispatch Trigger -> Enters Targeting Mode */}
           <button
-            onClick={() => setIsSOSModalOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white font-black text-xs tracking-wider uppercase transition-all shadow-lg shadow-red-600/30 active:scale-95 border border-red-400"
+            type="button"
+            onClick={() => startTargetingWorkflow('FIRE', 4)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-white font-sans font-bold text-xs tracking-wider transition-all border border-slate-700 hover:border-cyan-400 cursor-pointer min-h-[36px]"
+            title="Create New Incident via Map Targeting"
           >
-            <ShieldAlert className="w-4 h-4" />
-            <span className="hidden sm:inline">{t('nav.trigger_sos')}</span>
+            <Crosshair className="w-3.5 h-3.5 text-cyan-400" />
+            <span className="hidden sm:inline">NEW INCIDENT</span>
           </button>
 
-          {/* Language Switcher */}
-          <LanguageSwitcher />
-
-          {/* Logout Button */}
+          {/* Prominent Red Emergency Duress / SOS Button -> Enters Targeting Mode */}
           <button
-            onClick={logout}
-            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors border border-slate-700"
-            title={t('nav.logout')}
+            type="button"
+            onClick={() => startTargetingWorkflow('SOS_DURESS', 5)}
+            className="flex items-center gap-2 px-3.5 py-1.5 rounded-md bg-red-600 hover:bg-red-500 text-white font-sans font-black text-xs tracking-wider transition-all border-2 border-red-400 shadow-lg shadow-red-950/80 animate-pulse hover:animate-none cursor-pointer min-h-[36px]"
+            title="Immediate Operator Duress / Emergency SOS Broadcast"
           >
-            <LogOut className="w-4 h-4 rtl:rotate-180" />
+            <span className="w-2 h-2 rounded-full bg-white animate-ping" />
+            <Flame className="w-3.5 h-3.5" />
+            <span>[EMERGENCY SOS]</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={logout}
+            className="p-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white border border-slate-700 transition-colors cursor-pointer min-h-[36px] min-w-[36px] flex items-center justify-center"
+            title="Terminate Terminal Session"
+          >
+            <LogOut className="w-4 h-4" />
           </button>
         </div>
       </header>
 
       {/* ----------------------------------------------------------------- */}
-      {/* 2. MAIN EOC COMMAND BODY (Tactical Map + High-Contrast Feed)      */}
+      {/* TARGET ACQUISITION HUD STRIP (ACTIVE WHEN TARGETING MODE IS ON)    */}
       {/* ----------------------------------------------------------------- */}
-      <main className="flex-1 flex flex-col md:flex-row p-3 gap-3 overflow-hidden">
-        {/* Tactical GIS Map (62% width) */}
-        <section className="flex-1 md:w-[62%] h-[48vh] md:h-full">
-          <EnterpriseMap
-            incidents={incidents}
-            activeIncident={activeIncident}
-            onSelectIncident={setActiveIncident}
-          />
-        </section>
-
-        {/* AI Incident & Multi-Agency Dispatch Feed (38% width) */}
-        <section className="md:w-[38%] h-[52vh] md:h-full">
-          <AIIncidentFeed
-            incidents={incidents}
-            activeIncident={activeIncident}
-            onSelectIncident={setActiveIncident}
-          />
-        </section>
-      </main>
-
-      {/* ----------------------------------------------------------------- */}
-      {/* 3. INTERACTIVE TACTICAL TOOLBAR (Fixed Bottom Command Bar)         */}
-      {/* ----------------------------------------------------------------- */}
-      <footer className="h-14 bg-slate-900 border-t-2 border-slate-700 px-4 flex items-center justify-between shrink-0 z-20 shadow-2xl">
-        {/* Left: Active Target Hotspot Indicator */}
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs font-mono">
-            <Crosshair className="w-4 h-4 text-yellow-400 animate-spin" style={{ animationDuration: '8s' }} />
-            <span className="text-slate-400 font-bold uppercase text-[10px]">
-              {t('toolbar.active_focus')}:
-            </span>
-            <span className="text-white font-extrabold truncate max-w-[180px] sm:max-w-xs">
-              {activeIncident ? activeIncident.location : t('toolbar.no_active_incident')}
-            </span>
+      {isTargetingMode && (
+        <div className="bg-red-950/95 border-b-2 border-red-500 px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs shadow-xl shadow-red-950 animate-in slide-in-from-top duration-200 z-30">
+          <div className="flex items-center gap-3">
+            <div className="w-7 h-7 rounded-lg bg-red-600 flex items-center justify-center text-white animate-spin">
+              <Crosshair className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="font-bold text-white uppercase tracking-wider text-xs flex items-center gap-2">
+                <span>TARGET ACQUISITION MODE ACTIVE</span>
+                <span className="px-2 py-0.5 rounded bg-red-600 text-white text-[10px] font-bold">
+                  {pendingDispatchType}
+                </span>
+              </div>
+              <p className="text-xs text-red-200 font-medium mt-0.5">
+                CLICK ANY POSITION ON THE MAP TO ACQUIRE TARGET COORDINATES OR CAPTURE LIVE GPS
+              </p>
+            </div>
           </div>
-          {activeIncident && (
-            <span className="hidden lg:inline-flex items-center px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-800 text-yellow-400 border border-slate-600">
-              {activeIncident.latitude.toFixed(4)}°N, {activeIncident.longitude.toFixed(4)}°E
-            </span>
-          )}
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleFetchGPS}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-cyan-700 hover:bg-cyan-600 text-white font-sans font-bold text-xs uppercase border border-cyan-400 shadow-sm transition-all cursor-pointer min-h-[36px]"
+            >
+              <LocateFixed className="w-3.5 h-3.5 text-cyan-200" />
+              <span>ACQUIRE GPS POSITION</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setIsTargetingMode(false)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-sans font-bold text-xs uppercase border border-slate-600 transition-all cursor-pointer min-h-[36px]"
+            >
+              <X className="w-3.5 h-3.5" />
+              <span>ABORT TARGETING</span>
+            </button>
+          </div>
         </div>
-
-        {/* Right: Interactive Action Buttons (WCAG High-Contrast Buttons) */}
-        <div className="flex items-center gap-2.5">
-          {/* Button 1: Print Incident Report */}
-          <button
-            type="button"
-            onClick={handlePrintReport}
-            className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-extrabold text-xs tracking-wider uppercase transition-all border border-slate-600 hover:border-cyan-400 shadow-md active:scale-95"
-            title="Print Official Incident Report Manifest"
-          >
-            <Printer className="w-4 h-4 text-cyan-300" />
-            <span className="hidden sm:inline">{t('toolbar.print_report')}</span>
-          </button>
-
-          {/* Button 2: Share Coordinates */}
-          <button
-            type="button"
-            onClick={handleShareCoordinates}
-            className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-extrabold text-xs tracking-wider uppercase transition-all border border-slate-600 hover:border-yellow-400 shadow-md active:scale-95"
-            title="Transmit & Copy Target Coordinates"
-          >
-            <Share2 className="w-4 h-4 text-yellow-400" />
-            <span className="hidden sm:inline">{t('toolbar.share_coords')}</span>
-          </button>
-
-          {/* Button 3: Activate Nearby CCTV */}
-          <button
-            type="button"
-            onClick={handleActivateCCTV}
-            className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-black text-xs tracking-wider uppercase transition-all border-2 border-cyan-300 shadow-lg shadow-cyan-600/30 active:scale-95"
-            title="Open Embedded Tactical Video Surveillance Feed"
-          >
-            <Video className="w-4 h-4 text-slate-950" />
-            <span className="hidden sm:inline">{t('toolbar.activate_cctv')}</span>
-          </button>
-        </div>
-      </footer>
+      )}
 
       {/* ----------------------------------------------------------------- */}
-      {/* TOAST FEEDBACK ALERT NOTIFICATION                                */}
+      {/* 2. MAIN 12-COLUMN RIGID GRID LAYOUT                                */}
       {/* ----------------------------------------------------------------- */}
+      <div className="flex-1 grid grid-cols-12 gap-1 p-1 overflow-hidden">
+        {/* =============================================================== */}
+        {/* LEFT / SIDE PANEL: AI INCIDENTS & READINESS (COL-SPAN-4)         */}
+        {/* =============================================================== */}
+        <aside className="col-span-12 lg:col-span-4 xl:col-span-3 flex flex-col gap-1 overflow-hidden h-full">
+          {/* Top Panel: AI Incident Queue */}
+          <div className="flex-1 overflow-hidden border border-slate-800 bg-[#0d1117]">
+            <AIIncidentFeed
+              incidents={incidents}
+              activeIncident={activeIncident}
+              onSelectIncident={setActiveIncident}
+            />
+          </div>
+
+          {/* Bottom Panel: Live Mobilized Emergency Units */}
+          <div className="h-48 shrink-0 border border-slate-800 bg-[#0d1117] p-2.5 flex flex-col overflow-hidden text-xs">
+            <div className="flex items-center justify-between pb-1.5 mb-2 border-b border-slate-800 font-bold">
+              <span className="text-yellow-400 uppercase tracking-wider flex items-center gap-1.5 text-xs">
+                <Users className="w-3.5 h-3.5 text-cyan-400" />
+                EMERGENCY UNITS // TELEMETRY
+              </span>
+              <span className="text-[10px] text-emerald-400 px-1.5 py-0.5 rounded bg-slate-950 border border-emerald-500/40 font-mono font-bold">
+                {liveUnits?.length || 3} MOBILIZED
+              </span>
+            </div>
+
+            <div className="flex-1 overflow-y-auto space-y-1.5 custom-scrollbar">
+              {(liveUnits || []).map((u) => (
+                <div
+                  key={u.id}
+                  className="p-2 rounded bg-slate-950/80 border border-slate-800 flex items-center justify-between"
+                >
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="w-2.5 h-2.5 rounded-full animate-pulse"
+                      style={{ backgroundColor: u.agencyColor || '#0077ff' }}
+                    />
+                    <div>
+                      <span className="text-white font-bold text-xs">{u.callsign || u.id}</span>
+                      <span className="text-[11px] text-slate-400 ml-1.5">({u.type})</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 font-mono text-[11px]">
+                    <span className="text-yellow-300">
+                      {u.lat.toFixed(3)}°N, {u.lng.toFixed(3)}°E
+                    </span>
+                    <span
+                      className="font-bold px-1.5 py-0.5 rounded text-[10px]"
+                      style={{
+                        color: u.agencyColor || '#00ffcc',
+                        backgroundColor: `${u.agencyColor || '#00ffcc'}15`,
+                        border: `1px solid ${u.agencyColor || '#00ffcc'}40`,
+                      }}
+                    >
+                      {u.status}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </aside>
+
+        {/* =============================================================== */}
+        {/* CENTER / RIGHT VIEWPORT: MAP (TOP) + DATA MANIFEST (BOTTOM)     */}
+        {/* =============================================================== */}
+        <section className="col-span-12 lg:col-span-8 xl:col-span-9 flex flex-col gap-1 overflow-hidden h-full">
+          {/* Top Panel: Dedicated Map Viewport with Isolated Camera Coverage Overlay */}
+          <div className="h-[58%] border border-slate-800 bg-[#0c1017] relative overflow-hidden">
+            <EnterpriseMap
+              incidents={incidents}
+              activeIncident={activeIncident}
+              onSelectIncident={setActiveIncident}
+              onRoutingResolved={handleRoutingResolved}
+              liveUnits={liveUnits}
+              setLiveUnits={setLiveUnits}
+              isTargetingMode={isTargetingMode}
+              onLocationAcquired={handleLocationAcquired}
+              acquiredCoords={pendingTargetCoords}
+            >
+              {/* Isolated Camera Coverage Overlay (Sector Wedges + Direction Markers) */}
+              <CameraCoverageOverlay
+                cameras={cameras}
+                activeCameraId={activeCameraId}
+                onSelectCamera={handleSelectCamera}
+              />
+            </EnterpriseMap>
+          </div>
+
+          {/* Bottom Panel: Incident Data Grid & Unified Action Bar */}
+          <div className="h-[42%] border border-slate-800 bg-[#0d1117] flex flex-col overflow-hidden text-xs">
+            {/* Datatable Action Bar */}
+            <div className="px-3 py-2 bg-[#141922] border-b border-slate-800 flex items-center justify-between shrink-0 text-xs">
+              <div className="flex items-center gap-2">
+                <Activity className="w-4 h-4 text-cyan-400" />
+                <span className="font-bold text-slate-100 uppercase tracking-wider text-xs">
+                  HUMANITARIAN INCIDENT MANIFEST // FIELD OPERATIONS
+                </span>
+                <span className="text-slate-500">|</span>
+                <span className="text-yellow-400 font-mono font-bold text-xs">
+                  {incidents.length} RECORDS LOGGED
+                </span>
+              </div>
+
+              {/* Action Buttons: Print Report, Share Coords, Unified CCTV Control Center */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={handlePrintReport}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs uppercase border border-slate-700 hover:border-cyan-400 transition-all cursor-pointer min-h-[34px]"
+                  title="Print Official Incident Manifest"
+                >
+                  <Printer className="w-3.5 h-3.5 text-cyan-300" />
+                  <span>PRINT REPORT</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleShareCoordinates}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs uppercase border border-slate-700 hover:border-yellow-400 transition-all cursor-pointer min-h-[34px]"
+                  title="Share Incident Coordinates"
+                >
+                  <Share2 className="w-3.5 h-3.5 text-yellow-400" />
+                  <span>SHARE COORDS</span>
+                </button>
+
+                {/* Unified CCTV Control Center (Replaces scattered mode buttons) */}
+                <button
+                  type="button"
+                  onClick={() => setIsCCTVControlCenterOpen(true)}
+                  className="flex items-center gap-2 px-3.5 py-1.5 rounded-md bg-cyan-700 hover:bg-cyan-600 text-white font-bold text-xs uppercase border border-cyan-400 shadow-md transition-all cursor-pointer min-h-[34px]"
+                  title="Open Unified CCTV Reconnaissance & Coverage Control Center"
+                >
+                  <Video className="w-4 h-4 text-cyan-200" />
+                  <span>CCTV CONTROL CENTER</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Tabular Datatable Viewport */}
+            <div className="flex-1 overflow-x-auto overflow-y-auto custom-scrollbar">
+              <table className="w-full text-start border-collapse text-xs">
+                <thead>
+                  <tr className="bg-[#0f141c] text-slate-400 border-b border-slate-800 uppercase tracking-wider font-bold sticky top-0 z-10 text-[11px]">
+                    <th className="py-2 px-3 text-start">PRIORITY</th>
+                    <th className="py-2 px-3 text-start">TARGET SECTOR</th>
+                    <th className="py-2 px-3 text-start">TYPE</th>
+                    <th className="py-2 px-3 text-start">GRID COORDINATES</th>
+                    <th className="py-2 px-3 text-start">DESCRIPTION / SUMMARY</th>
+                    <th className="py-2 px-3 text-start">DESTINATION / ROUTE</th>
+                    <th className="py-2 px-3 text-start">STATUS</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/80 font-medium">
+                  {incidents.map((row) => {
+                    const isSelected = activeIncident?.id === row.id
+                    const severity = row.classification?.severity_level || row.severity || 3
+                    const lat = row.latitude || row.lat || 31.5125
+                    const lng = row.longitude || row.lng || 34.4533
+                    const category = row.classification?.category || row.category || 'Fire'
+
+                    let pBadge = 'bg-emerald-950/80 text-emerald-400 border border-emerald-600'
+                    if (severity >= 5) pBadge = 'bg-red-950/80 text-red-400 border border-red-600'
+                    else if (severity === 4) pBadge = 'bg-orange-950/80 text-orange-400 border border-orange-600'
+                    else if (severity === 3) pBadge = 'bg-amber-950/80 text-amber-300 border border-amber-600'
+
+                    return (
+                      <tr
+                        key={row.id}
+                        onClick={() => setActiveIncident(row)}
+                        className={`transition-colors cursor-pointer text-xs ${
+                          isSelected
+                            ? 'bg-[#1b2432] text-white border-l-2 border-l-cyan-400'
+                            : 'hover:bg-[#121721] text-slate-300'
+                        }`}
+                      >
+                        {/* Priority Column */}
+                        <td className="py-2 px-3 whitespace-nowrap">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${pBadge}`}>
+                            P{severity}-LEVEL
+                          </span>
+                        </td>
+
+                        {/* Target Location Column */}
+                        <td className="py-2 px-3 whitespace-nowrap font-bold text-white">
+                          <div className="flex items-center gap-1.5">
+                            <span className="w-2 h-2 rounded-full bg-red-500" />
+                            <span>{row.location}</span>
+                          </div>
+                        </td>
+
+                        {/* Type Category Column */}
+                        <td className="py-2 px-3 whitespace-nowrap text-cyan-400 font-bold uppercase">
+                          {category}
+                        </td>
+
+                        {/* Grid Coordinates Column */}
+                        <td className="py-2 px-3 whitespace-nowrap font-mono text-yellow-300">
+                          {lat.toFixed(4)}°N, {lng.toFixed(4)}°E
+                        </td>
+
+                        {/* Description / Summary Column */}
+                        <td className="py-2 px-3 max-w-sm truncate text-slate-300" title={row.classification?.summary || row.text}>
+                          {row.classification?.summary || row.text || 'Emergency incident dispatched.'}
+                        </td>
+
+                        {/* Destination / Hospital Route Telemetry Column */}
+                        <td className="py-2 px-3 whitespace-nowrap">
+                          {isSelected && routingTelemetry ? (
+                            <span className="font-mono text-cyan-300 font-bold">
+                              {routingTelemetry.hospitalName} ({routingTelemetry.distanceKm} km | ETA {routingTelemetry.etaMin}m)
+                            </span>
+                          ) : (
+                            <span className="text-slate-500 font-mono">HQ-TRAUMA-CENTER (AUTO)</span>
+                          )}
+                        </td>
+
+                        {/* Status Column */}
+                        <td className="py-2 px-3 whitespace-nowrap">
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-emerald-950 text-emerald-300 border border-emerald-600/60 flex items-center gap-1.5 w-max">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                            {row.status || 'ACTIVE DISPATCH'}
+                          </span>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      {/* ----------------------------------------------------------------- */}
+      {/* 3. MODALS AND NOTIFICATIONS                                        */}
+      {/* ----------------------------------------------------------------- */}
+      {/* HUD Notification Toast */}
       {toastMessage && (
-        <div className="fixed bottom-20 start-1/2 -translate-x-1/2 z-[2000] bg-slate-900 border-2 border-yellow-400 text-yellow-300 px-6 py-3 rounded-2xl shadow-2xl flex items-center gap-3 font-mono text-xs font-bold animate-bounce">
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[3500] bg-slate-900 border-2 border-yellow-400 text-yellow-300 px-4 py-2 rounded-lg text-xs font-mono font-bold shadow-2xl flex items-center gap-2 animate-in fade-in zoom-in-95">
           <Check className="w-4 h-4 text-yellow-400" />
           <span>{toastMessage}</span>
         </div>
       )}
 
-      {/* ----------------------------------------------------------------- */}
-      {/* MODAL 1: EMBEDDED TACTICAL CCTV SURVEILLANCE FEED                 */}
-      {/* ----------------------------------------------------------------- */}
-      {isCCTVModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fade-in font-sans">
-          <div className="bg-slate-900 border-2 border-cyan-400 rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl relative flex flex-col">
-            {/* CCTV Window Header */}
-            <div className="p-4 bg-slate-950 border-b-2 border-slate-700 flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <span className="h-3 w-3 rounded-full bg-red-500 animate-ping" />
-                <span className="font-mono font-black text-sm text-white tracking-widest uppercase">
-                  {t('cctv.feed_name')}
-                </span>
-                <span className="px-2 py-0.5 rounded bg-red-600 text-white font-mono text-[10px] font-black uppercase">
-                  REC • 1080P
-                </span>
-              </div>
-              <button
-                onClick={() => setIsCCTVModalOpen(false)}
-                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+      {/* Unified CCTV Reconnaissance & Coverage Control Center */}
+      <CCTVControlCenter
+        isOpen={isCCTVControlCenterOpen}
+        onClose={() => setIsCCTVControlCenterOpen(false)}
+        cameras={cameras}
+        activeCameraId={activeCameraId}
+        onUpdateCamera={handleUpdateCamera}
+        onSelectCamera={(cam) => setActiveCameraId(cam.id)}
+        activeIncident={activeIncident}
+      />
 
-            {/* Live Tactical Optical / Thermal Video Component */}
-            <TacticalCCTVFeed
-              incident={activeIncident}
-              mode={cctvMode}
-              isArabic={isArabic}
-            />
+      {/* Human-Centered Confirmation Modal (No Native Alerts) */}
+      <TacticalConfirmModal
+        isOpen={isConfirmModalOpen}
+        onClose={() => setIsConfirmModalOpen(false)}
+        onConfirm={handleExecuteDispatch}
+        targetCoords={pendingTargetCoords}
+        incidentType={pendingDispatchType}
+        severity={pendingSeverity}
+        isTransmitting={isTransmitting}
+      />
 
-            {/* Video Controls & Mode Toggles */}
-            <div className="p-4 bg-slate-950 border-t border-slate-800 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-slate-400 font-bold uppercase">{t('cctv.status')}:</span>
-                <button
-                  type="button"
-                  onClick={() => setCctvMode('optical')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold ${
-                    cctvMode === 'optical'
-                      ? 'bg-cyan-500 text-slate-950 font-black'
-                      : 'bg-slate-800 text-slate-300 hover:text-white'
-                  }`}
-                >
-                  {t('cctv.optical')}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setCctvMode('thermal')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold ${
-                    cctvMode === 'thermal'
-                      ? 'bg-amber-500 text-slate-950 font-black'
-                      : 'bg-slate-800 text-slate-300 hover:text-white'
-                  }`}
-                >
-                  {t('cctv.thermal')}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setCctvMode('infrared')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold ${
-                    cctvMode === 'infrared'
-                      ? 'bg-emerald-500 text-slate-950 font-black'
-                      : 'bg-slate-800 text-slate-300 hover:text-white'
-                  }`}
-                >
-                  {t('cctv.infrared')}
-                </button>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setIsCCTVModalOpen(false)}
-                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold"
-              >
-                {t('cctv.close_btn')}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ----------------------------------------------------------------- */}
-      {/* MODAL 2: PRINT OFFICIAL INCIDENT REPORT MANIFEST                   */}
-      {/* ----------------------------------------------------------------- */}
+      {/* Print Report Modal */}
       {isPrintModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fade-in font-sans">
-          <div className="bg-slate-900 border-2 border-slate-600 rounded-3xl w-full max-w-xl p-6 shadow-2xl relative text-white">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-sm text-xs font-sans">
+          <div className="bg-[#0f141c] border-2 border-slate-600 rounded-lg w-full max-w-lg p-5 shadow-2xl relative text-white">
             <button
               onClick={() => setIsPrintModalOpen(false)}
-              className="absolute top-5 end-5 text-slate-400 hover:text-white"
+              className="absolute top-4 right-4 text-slate-400 hover:text-white cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
-
-            {/* Official Report Header */}
-            <div className="border-b-2 border-slate-700 pb-4 mb-4">
-              <div className="flex items-center gap-2 text-cyan-400 mb-1">
-                <Printer className="w-5 h-5" />
-                <span className="text-xs font-mono font-bold uppercase tracking-widest">
-                  {t('report.agency_header')}
-                </span>
+            <div className="border-b border-slate-700 pb-2 mb-3">
+              <div className="text-cyan-400 font-bold uppercase text-xs tracking-wider">
+                OFFICIAL HUMANITARIAN DISPATCH MANIFEST
               </div>
-              <h3 className="text-lg font-black text-white">{t('report.title')}</h3>
-              <p className="text-xs text-yellow-400 font-mono mt-0.5 font-bold">
-                INCIDENT ID: {activeIncident?.id || 'INC-2026-ALPHA'} • TENANT: {tenantId}
+              <h3 className="text-base font-bold text-white mt-1">{activeIncident?.location}</h3>
+            </div>
+            <div className="space-y-2 bg-slate-950 p-3.5 rounded-md text-xs border border-slate-800">
+              <p className="text-slate-200 leading-relaxed">
+                {activeIncident?.classification?.summary || activeIncident?.text}
               </p>
-            </div>
-
-            {/* Printable Content Details */}
-            <div className="space-y-3.5 bg-slate-950 p-4 rounded-2xl border border-slate-800 text-xs">
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <span className="text-slate-400 block font-semibold">LOCATION SECTOR:</span>
-                  <span className="font-black text-white text-sm">{activeIncident?.location}</span>
-                </div>
-                <div>
-                  <span className="text-slate-400 block font-semibold">SEVERITY INDEX:</span>
-                  <span className="font-mono font-black text-yellow-400 text-sm">
-                    LEVEL {activeIncident?.classification?.severity_level || 4} / 5
-                  </span>
-                </div>
-              </div>
-
-              <div>
-                <span className="text-slate-400 block font-semibold mb-1">COORDINATES:</span>
-                <span className="font-mono font-bold text-cyan-300">
-                  {activeIncident?.latitude.toFixed(6)}° N, {activeIncident?.longitude.toFixed(6)}° E
-                </span>
-              </div>
-
-              <div>
-                <span className="text-slate-400 block font-semibold mb-1">AI TACTICAL SUMMARY:</span>
-                <p className="text-slate-200 leading-relaxed font-medium bg-slate-900 p-2.5 rounded-lg border border-slate-800">
-                  {activeIncident?.classification?.summary || 'Tactical emergency dispatched by AI.'}
-                </p>
-              </div>
-
-              <div>
-                <span className="text-slate-400 block font-semibold mb-1">MOBILIZED UNITS:</span>
-                <div className="space-y-1">
-                  {activeIncident?.dispatches?.map((d, i) => (
-                    <div key={i} className="flex items-center justify-between bg-slate-900 px-3 py-1.5 rounded border border-slate-800">
-                      <span className="font-bold text-white">{t(`agencies.${d.agency_type}`) || d.agency_type}</span>
-                      <span className="font-mono font-black text-yellow-400">{d.required_units || d.units || 1} Units</span>
-                    </div>
-                  ))}
-                </div>
+              <div className="text-yellow-400 font-bold font-mono pt-1">
+                PRIORITY: LEVEL {activeIncident?.classification?.severity_level || 3} // STATUS: ACTIVE
               </div>
             </div>
-
-            {/* Modal Actions */}
-            <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-800 mt-4">
+            <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-800 mt-4">
               <button
-                type="button"
                 onClick={() => setIsPrintModalOpen(false)}
-                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold"
+                className="px-4 py-2 rounded-md bg-slate-800 text-white font-bold cursor-pointer text-xs"
               >
-                {t('report.close_btn')}
+                CANCEL
               </button>
               <button
-                type="button"
                 onClick={() => {
                   window.print()
                   setIsPrintModalOpen(false)
                 }}
-                className="px-5 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-black text-xs flex items-center gap-2 shadow-lg shadow-cyan-600/30"
+                className="px-4 py-2 rounded-md bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold cursor-pointer text-xs"
               >
-                <Printer className="w-4 h-4" />
-                <span>{t('report.print_btn')}</span>
+                PRINT MANIFEST
               </button>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* ----------------------------------------------------------------- */}
-      {/* MODAL 3: BROADCAST NEW DISTRESS SOS                               */}
-      {/* ----------------------------------------------------------------- */}
-      {isSOSModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fade-in font-sans">
-          <div className="bg-slate-900 border-2 border-red-500/80 rounded-3xl w-full max-w-lg p-6 shadow-2xl relative text-white">
-            <button
-              onClick={() => setIsSOSModalOpen(false)}
-              className="absolute top-5 end-5 text-slate-400 hover:text-white"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            <div className="flex items-center gap-2.5 mb-2 text-red-500">
-              <Flame className="w-6 h-6" />
-              <h3 className="font-black text-base text-white">{t('modal.title')}</h3>
-            </div>
-            <p className="text-xs text-slate-300 mb-4 leading-relaxed font-medium">
-              {t('modal.desc')}
-            </p>
-
-            {/* Quick Emergency Presets with Target Coordinates */}
-            <div className="mb-4">
-              <span className="text-[11px] font-black text-yellow-400 uppercase tracking-wider block mb-2">
-                {t('modal.quick_examples')}
-              </span>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                {DEMO_PRESETS.map((preset) => {
-                  const isSelected = selectedPresetId === preset.id
-                  return (
-                    <button
-                      key={preset.id}
-                      type="button"
-                      onClick={() => {
-                        setSelectedPresetId(preset.id)
-                        setSosText(preset.text)
-                        setTargetCoords({ lat: preset.lat, lng: preset.lng })
-                      }}
-                      className={`p-2.5 rounded-xl border text-start transition-all font-semibold flex flex-col gap-1 cursor-pointer ${
-                        isSelected
-                          ? 'bg-cyan-950/80 border-cyan-400 text-white shadow-lg shadow-cyan-900/30 ring-1 ring-cyan-400'
-                          : 'bg-slate-800 hover:bg-slate-700/80 border-slate-700 text-slate-200'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="font-extrabold text-white text-xs">
-                          {isArabic ? preset.labelAr : preset.labelEn}
-                        </span>
-                        <span className="text-[10px] font-mono font-bold text-yellow-400">
-                          {preset.lat.toFixed(2)}°, {preset.lng.toFixed(2)}°
-                        </span>
-                      </div>
-                      <span className="text-[11px] text-slate-400 truncate">
-                        {preset.location}
-                      </span>
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-
-            <form onSubmit={handleSendSOS} className="space-y-4">
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs font-bold text-white">
-                    {t('modal.input_label')}
-                  </label>
-                  <span className="text-[10px] font-mono font-bold text-yellow-400">
-                    TARGET: {targetCoords.lat.toFixed(4)}°N, {targetCoords.lng.toFixed(4)}°E
-                  </span>
-                </div>
-                <textarea
-                  rows={4}
-                  required
-                  value={sosText}
-                  onChange={(e) => setSosText(e.target.value)}
-                  placeholder={t('modal.input_placeholder')}
-                  className="w-full bg-slate-950 border-2 border-slate-700 rounded-xl p-3.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400 transition-colors font-medium"
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-2.5 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setIsSOSModalOpen(false)}
-                  className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold"
-                >
-                  {t('modal.cancel_btn')}
-                </button>
-                <button
-                  type="submit"
-                  disabled={!sosText.trim()}
-                  className="px-6 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-black flex items-center gap-2 disabled:opacity-50 shadow-lg shadow-red-600/30 cursor-pointer active:scale-95 transition-all"
-                >
-                  <Send className="w-4 h-4 rtl:rotate-180" />
-                  <span>{t('modal.send_btn')}</span>
-                </button>
-              </div>
-            </form>
           </div>
         </div>
       )}
     </div>
   )
 }
+
+export default Dashboard

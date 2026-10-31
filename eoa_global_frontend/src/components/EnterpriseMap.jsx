@@ -1,141 +1,197 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react'
-import maplibregl from 'maplibre-gl'
-import * as pmtiles from 'pmtiles'
-import { useTranslation } from 'react-i18next'
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import {
-  Flame,
-  Shield,
-  Stethoscope,
-  LifeBuoy,
-  MapPin,
-  Users,
-  Activity,
-  Navigation,
-  Clock,
-  Radio,
-  CheckCircle,
-  Crosshair,
-  Layers,
-  AlertTriangle,
-  Eye,
-  Database,
-} from 'lucide-react'
-import { getSatelliteConfig } from '../services/satelliteProvider'
+  MapContainer,
+  TileLayer,
+  Marker,
+  Popup,
+  Polyline,
+  CircleMarker,
+  LayersControl,
+  useMap,
+  useMapEvents,
+} from 'react-leaflet'
+import L from 'leaflet'
+import 'leaflet/dist/leaflet.css'
+import 'leaflet-routing-machine/dist/leaflet-routing-machine.css'
+import { Crosshair } from 'lucide-react'
+import { TACTICAL_WAYPOINTS } from '../hooks/useLiveFeed'
 
-// =============================================================================
-// CUSTOM INDEXEDDB PMTILES CHUNK SOURCE WITH ETAG INVALIDATION & PERSISTENCE
-// Implements PMTiles Source interface backed by browser IndexedDB
-// =============================================================================
-class IndexedDBSource {
-  constructor(url) {
-    this.url = url
-    this.dbName = 'eoa_pmtiles_v1'
-    this.storeName = 'chunks'
-    this.dbPromise = this.initDB()
-    this.requestPersistence()
-  }
-
-  async requestPersistence() {
-    if (typeof navigator !== 'undefined' && navigator.storage && navigator.storage.persist) {
-      try {
-        await navigator.storage.persist()
-      } catch (e) {
-        // Silently handled
-      }
-    }
-  }
-
-  async initDB() {
-    return new Promise((resolve, reject) => {
-      const req = indexedDB.open(this.dbName, 1)
-      req.onupgradeneeded = (e) => {
-        const db = e.target.result
-        if (!db.objectStoreNames.contains(this.storeName)) {
-          const store = db.createObjectStore(this.storeName, { keyPath: 'key' })
-          store.createIndex('timestamp', 'timestamp', { unique: false })
-        }
-      }
-      req.onsuccess = () => resolve(req.result)
-      req.onerror = () => reject(req.error)
-    })
-  }
-
-  async getBytes(offset, length, signal) {
-    const db = await this.dbPromise
-    const cacheKey = `${this.url}_${offset}_${length}`
-
-    // 1. Check IndexedDB cache first
-    try {
-      const cached = await new Promise((resolve) => {
-        const tx = db.transaction(this.storeName, 'readonly')
-        const req = tx.objectStore(this.storeName).get(cacheKey)
-        req.onsuccess = () => resolve(req.result)
-        req.onerror = () => resolve(null)
-      })
-
-      if (cached && cached.data) {
-        return { data: cached.data.slice(0), etag: cached.etag }
-      }
-    } catch (e) {
-      // Fall through to fetch
-    }
-
-    // 2. Fetch byte range from network
-    const resp = await fetch(this.url, {
-      headers: { Range: `bytes=${offset}-${offset + length - 1}` },
-      signal,
-    })
-
-    if (!resp.ok && resp.status !== 206) {
-      throw new Error(`PMTiles Range Request Failed: ${resp.status}`)
-    }
-
-    const currentEtag = resp.headers.get('ETag') || ''
-    const buffer = await resp.arrayBuffer()
-
-    // 3. Save chunk into IndexedDB with LRU timestamp
-    try {
-      const tx = db.transaction(this.storeName, 'readwrite')
-      tx.objectStore(this.storeName).put({
-        key: cacheKey,
-        data: buffer,
-        etag: currentEtag,
-        timestamp: Date.now(),
-      })
-    } catch (e) {
-      // Storage quota or transaction errors gracefully ignored
-    }
-
-    return { data: buffer, etag: currentEtag }
-  }
-
-  getKey() {
-    return this.url
-  }
+// Guarantee Leaflet global is available for plugins
+if (typeof window !== 'undefined') {
+  window.L = L
 }
 
-// Global PMTiles Protocol Instance with Custom IndexedDB Source
-let protocol = new pmtiles.Protocol()
-maplibregl.addProtocol('pmtiles', protocol.tile)
+// Asynchronously load leaflet-routing-machine plugin
+const ensureRoutingMachine = async () => {
+  if (typeof window === 'undefined') return false
+  window.L = L
+  if (!window.L.Routing) {
+    try {
+      await import('leaflet-routing-machine')
+    } catch (err) {
+      console.warn('[C4ISR OSINT] Failed to load leaflet-routing-machine:', err)
+      return false
+    }
+  }
+  return Boolean(window.L && window.L.Routing && typeof window.L.Routing.control === 'function')
+}
 
-// Configure local self-hosted RTL Text Plugin for Arabic Bi-Directional Shaping
-if (typeof window !== 'undefined' && maplibregl.getRTLTextPluginStatus() === 'unavailable') {
-  maplibregl.setRTLTextPlugin(
-    '/vendor/mapbox-gl-rtl-text.js',
-    null,
-    true // Lazy loading
+// =============================================================================
+// 1. MILITARY COORDINATE GRATICULE OVERLAY
+// Dynamic SVG geographic targeting grid with latitude/longitude marks & crosshairs
+// =============================================================================
+const MilitaryGraticuleOverlay = React.memo(() => {
+  const map = useMap()
+  const [gridData, setGridData] = useState({ lines: [], labels: [] })
+
+  const updateGraticule = () => {
+    if (!map) return
+    const bounds = map.getBounds()
+    const zoom = map.getZoom()
+
+    // Determine grid line spacing based on zoom level
+    let step = 0.5
+    if (zoom >= 16) step = 0.005
+    else if (zoom >= 14) step = 0.01
+    else if (zoom >= 12) step = 0.02
+    else if (zoom >= 10) step = 0.05
+    else if (zoom >= 8) step = 0.1
+    else if (zoom >= 6) step = 0.25
+
+    const minLat = Math.floor(bounds.getSouth() / step) * step
+    const maxLat = Math.ceil(bounds.getNorth() / step) * step
+    const minLng = Math.floor(bounds.getWest() / step) * step
+    const maxLng = Math.ceil(bounds.getEast() / step) * step
+
+    const lines = []
+    const labels = []
+
+    // Latitude horizontal lines
+    for (let lat = minLat; lat <= maxLat + 0.0001; lat += step) {
+      const p1 = map.latLngToContainerPoint([lat, bounds.getWest()])
+      const p2 = map.latLngToContainerPoint([lat, bounds.getEast()])
+      lines.push({ x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y, key: `lat-${lat.toFixed(4)}` })
+      labels.push({
+        x: 10,
+        y: Math.max(14, p1.y - 4),
+        text: `${lat.toFixed(3)}°N`,
+        key: `lbl-lat-${lat.toFixed(4)}`,
+      })
+    }
+
+    // Longitude vertical lines
+    for (let lng = minLng; lng <= maxLng + 0.0001; lng += step) {
+      const p1 = map.latLngToContainerPoint([bounds.getNorth(), lng])
+      const p2 = map.latLngToContainerPoint([bounds.getSouth(), lng])
+      lines.push({ x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y, key: `lng-${lng.toFixed(4)}` })
+      labels.push({
+        x: p1.x + 4,
+        y: 16,
+        text: `${lng.toFixed(3)}°E`,
+        key: `lbl-lng-${lng.toFixed(4)}`,
+      })
+    }
+
+    setGridData({ lines, labels })
+  }
+
+  useEffect(() => {
+    updateGraticule()
+    map.on('move', updateGraticule)
+    map.on('zoom', updateGraticule)
+    map.on('resize', updateGraticule)
+    return () => {
+      map.off('move', updateGraticule)
+      map.off('zoom', updateGraticule)
+      map.off('resize', updateGraticule)
+    }
+  }, [map])
+
+  return (
+    <div className="absolute inset-0 pointer-events-none z-[400] overflow-hidden select-none">
+      <svg className="w-full h-full">
+        {/* Graticule Grid Lines */}
+        {gridData.lines.map((l) => (
+          <line
+            key={l.key}
+            x1={l.x1}
+            y1={l.y1}
+            x2={l.x2}
+            y2={l.y2}
+            stroke="#0284c7"
+            strokeWidth="1"
+            strokeDasharray="4 6"
+            strokeOpacity="0.35"
+          />
+        ))}
+
+        {/* Tactical Crosshair Nodes at Grid Intersections */}
+        {gridData.lines.slice(0, 15).map((l, i) => (
+          <g key={`cross-${i}`}>
+            <line x1={l.x1 - 4} y1={l.y1} x2={l.x1 + 4} y2={l.y1} stroke="#0ea5e9" strokeWidth="1" strokeOpacity="0.6" />
+            <line x1={l.x1} y1={l.y1 - 4} x2={l.x1} y2={l.y1 + 4} stroke="#0ea5e9" strokeWidth="1" strokeOpacity="0.6" />
+          </g>
+        ))}
+
+        {/* Military Coordinate Margin Labels */}
+        {gridData.labels.map((lbl) => (
+          <text
+            key={lbl.key}
+            x={lbl.x}
+            y={lbl.y}
+            fill="#38bdf8"
+            fontSize="9"
+            fontFamily="monospace"
+            fontWeight="bold"
+            className="opacity-75 drop-shadow-[0_1px_1px_rgba(0,0,0,0.9)]"
+          >
+            {lbl.text}
+          </text>
+        ))}
+      </svg>
+
+      {/* Military Targeting Corner Reticles */}
+      <div className="absolute top-2 left-2 w-4 h-4 border-t-2 border-l-2 border-cyan-400 opacity-60" />
+      <div className="absolute top-2 right-2 w-4 h-4 border-t-2 border-r-2 border-cyan-400 opacity-60" />
+      <div className="absolute bottom-2 left-2 w-4 h-4 border-b-2 border-l-2 border-cyan-400 opacity-60" />
+      <div className="absolute bottom-2 right-2 w-4 h-4 border-b-2 border-r-2 border-cyan-400 opacity-60" />
+
+      {/* Compass Ordinal Watermark */}
+      <div className="absolute top-2 right-14 font-mono text-[9px] text-cyan-400/60 font-bold px-1.5 py-0.5 rounded bg-slate-900/80 border border-cyan-800/40">
+        GRATICULE: WGS84 // UTM 36N
+      </div>
+    </div>
   )
-}
+})
 
-// High-detail Levant operations bounding box
-const LEVANT_BBOX = {
-  minLng: 34.15,
-  minLat: 31.15,
-  maxLng: 35.65,
-  maxLat: 33.35,
-}
+// =============================================================================
+// 2. CAMERA CONTROLLER: Center targeting on selected incident
+// =============================================================================
+const MapCameraController = React.memo(({ targetCoordinates }) => {
+  const map = useMap()
+  const prevCoordRef = useRef(null)
 
-// Calculate Haversine distance in kilometers
+  useEffect(() => {
+    if (!targetCoordinates || !targetCoordinates[0] || !targetCoordinates[1]) return
+
+    const key = `${targetCoordinates[0].toFixed(5)}_${targetCoordinates[1].toFixed(5)}`
+    if (prevCoordRef.current === key) return
+    prevCoordRef.current = key
+
+    try {
+      map.flyTo(targetCoordinates, 14, {
+        duration: 1.2,
+        easeLinearity: 0.25,
+      })
+    } catch (e) {
+      map.setView(targetCoordinates, 14)
+    }
+  }, [targetCoordinates, map])
+
+  return null
+})
+
+// Haversine distance calculator
 const calculateDistanceKm = (lat1, lon1, lat2, lon2) => {
   const R = 6371
   const dLat = ((lat2 - lat1) * Math.PI) / 180
@@ -150,649 +206,653 @@ const calculateDistanceKm = (lat1, lon1, lat2, lon2) => {
   return R * c
 }
 
-// Local orthogonal fallback route generator when network routing is offline
+// Tactical route fallback path
 const generateFallbackRoute = (startLat, startLng, endLat, endLng) => {
   const midLat = startLat + (endLat - startLat) * 0.45
   const midLng = startLng + (endLng - startLng) * 0.55
   return [
-    [startLng, startLat],
-    [midLng, startLat],
-    [midLng, midLat],
-    [endLng, midLat],
-    [endLng, endLat],
+    [startLat, startLng],
+    [startLat, midLng],
+    [midLat, midLng],
+    [midLat, endLng],
+    [endLat, endLng],
   ]
 }
 
+// =============================================================================
+// 3. TACTICAL MILITARY MARKERS
+// Strict High-Contrast Color Code:
+// RED   = High-Value Target / Active Incident
+// BLUE  = Friendly Units / Emergency Dispatched Forces / Trauma Hospital
+// =============================================================================
+const createMilitaryTargetMarker = (severity = 3, id = 'TGT') => {
+  const html = `
+    <div class="relative flex items-center justify-center cursor-pointer">
+      <div class="absolute -inset-2 rounded-full border border-red-500 animate-ping opacity-75"></div>
+      <div class="w-8 h-8 rounded-md bg-red-600 border-2 border-white text-white font-mono font-black text-xs flex items-center justify-center shadow-lg shadow-red-950">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="22" y1="12" x2="18" y2="12"></line>
+          <line x1="6" y1="12" x2="2" y2="12"></line>
+          <line x1="12" y1="6" x2="12" y2="2"></line>
+          <line x1="12" y1="22" x2="12" y2="18"></line>
+        </svg>
+      </div>
+      <span class="absolute -bottom-4 px-1 rounded bg-black/90 text-red-400 font-mono text-[8px] font-bold border border-red-600 whitespace-nowrap">
+        TGT-P${severity}
+      </span>
+    </div>
+  `
+
+  return L.divIcon({
+    html,
+    className: 'military-target-marker',
+    iconSize: [32, 32],
+    iconAnchor: [16, 16],
+    popupAnchor: [0, -18],
+  })
+}
+
+const createFriendlyUnitMarker = (unitType = 'MED-01') => {
+  const html = `
+    <div class="relative flex items-center justify-center cursor-pointer">
+      <div class="w-8 h-8 rounded-md bg-blue-600 border-2 border-white text-white font-mono font-black text-xs flex items-center justify-center shadow-lg shadow-blue-950">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+          <polyline points="2 17 12 22 22 17"></polyline>
+          <polyline points="2 12 12 17 22 12"></polyline>
+        </svg>
+      </div>
+      <span class="absolute -bottom-4 px-1 rounded bg-black/90 text-blue-400 font-mono text-[8px] font-bold border border-blue-600 whitespace-nowrap">
+        FRIENDLY
+      </span>
+    </div>
+  `
+
+  return L.divIcon({
+    html,
+    className: 'military-friendly-marker',
+    iconSize: [32, 32],
+    iconAnchor: [16, 16],
+    popupAnchor: [0, -18],
+  })
+}
+
+// Marker for dynamically acquired target coordinates
+const createAcquiredTargetMarker = () => {
+  const html = `
+    <div class="relative flex items-center justify-center">
+      <div class="absolute -inset-3 rounded-full border-2 border-red-500 animate-ping opacity-85"></div>
+      <div class="w-9 h-9 rounded-full bg-red-600 border-2 border-white flex items-center justify-center shadow-[0_0_25px_rgba(239,68,68,1)] text-white">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="22" y1="12" x2="18" y2="12"></line>
+          <line x1="6" y1="12" x2="2" y2="12"></line>
+          <line x1="12" y1="6" x2="12" y2="2"></line>
+          <line x1="12" y1="22" x2="12" y2="18"></line>
+        </svg>
+      </div>
+      <span class="absolute -bottom-5 px-1.5 py-0.2 rounded bg-black/95 text-red-400 font-mono text-[9px] font-black border border-red-500 whitespace-nowrap animate-pulse">
+        TARGET LOCK
+      </span>
+    </div>
+  `
+
+  return L.divIcon({
+    html,
+    className: 'military-acquired-target-marker',
+    iconSize: [36, 36],
+    iconAnchor: [18, 18],
+    popupAnchor: [0, -20],
+  })
+}
+
+// Map Event Listener for Dynamic Click Targeting
+const TargetingMapEvents = ({ isTargetingMode, onLocationAcquired }) => {
+  useMapEvents({
+    click(e) {
+      if (isTargetingMode && onLocationAcquired) {
+        onLocationAcquired({ lat: e.latlng.lat, lng: e.latlng.lng })
+      }
+    },
+  })
+  return null
+}
+
+// =============================================================================
+// 4. OSINT ROUTING ENGINE CONTROLLER (LEAFLET ROUTING MACHINE + OSRM)
+// Optimized to prevent infinite render loops & memory leaks
+// =============================================================================
+const OSINTRoutingMachine = React.memo(({ activeIncident, onRoutingResolved }) => {
+  const map = useMap()
+  const routingControlRef = useRef(null)
+  const isMountedRef = useRef(true)
+  const onRoutingResolvedRef = useRef(onRoutingResolved)
+  const prevIncidentKeyRef = useRef('')
+
+  // Keep callback reference updated without triggering effect re-execution
+  useEffect(() => {
+    onRoutingResolvedRef.current = onRoutingResolved
+  }, [onRoutingResolved])
+
+  const incidentId = activeIncident?.id || null
+  const incLat = activeIncident ? (activeIncident.latitude || activeIncident.lat) : null
+  const incLng = activeIncident ? (activeIncident.longitude || activeIncident.lng) : null
+  const incidentKey = incidentId && incLat && incLng ? `${incidentId}_${incLat.toFixed(5)}_${incLng.toFixed(5)}` : null
+
+  useEffect(() => {
+    isMountedRef.current = true
+
+    if (!incidentKey || !incLat || !incLng) {
+      if (routingControlRef.current) {
+        try {
+          map.removeControl(routingControlRef.current)
+        } catch (e) {}
+        routingControlRef.current = null
+      }
+      prevIncidentKeyRef.current = ''
+      return
+    }
+
+    // Critical Guard: Only resolve if incident actually changed
+    if (prevIncidentKeyRef.current === incidentKey) {
+      return
+    }
+    prevIncidentKeyRef.current = incidentKey
+
+    const abortController = new AbortController()
+
+    const resolveDispatch = async () => {
+      let hospitalCoord = null
+      let hospitalName = 'HQ-TRAUMA-CENTER-ALPHA'
+
+      // Search nearest trauma facility via Overpass
+      try {
+        const q = `[out:json][timeout:4];(node["amenity"="hospital"](around:5000,${incLat},${incLng}););out center;`
+        const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(q)}`
+        const res = await fetch(url, { signal: abortController.signal })
+        if (res.ok) {
+          const d = await res.json()
+          if (d.elements?.length > 0) {
+            const first = d.elements[0]
+            hospitalCoord = [first.lat, first.lon]
+            hospitalName = first.tags?.name || first.tags?.['name:en'] || hospitalName
+          }
+        }
+      } catch (err) {}
+
+      if (!hospitalCoord) {
+        hospitalCoord = [incLat + 0.0105, incLng - 0.0125]
+      }
+
+      if (!isMountedRef.current) return
+
+      const dist = calculateDistanceKm(incLat, incLng, hospitalCoord[0], hospitalCoord[1])
+      const roadDistKm = Math.max(0.8, dist * 1.25)
+      const etaMin = Math.max(1.2, (roadDistKm / 52) * 60).toFixed(1)
+      const fallbackRoute = generateFallbackRoute(incLat, incLng, hospitalCoord[0], hospitalCoord[1])
+
+      // Push telemetry up via stable ref to avoid render loops
+      onRoutingResolvedRef.current?.({
+        hospitalCoord,
+        hospitalName,
+        distanceKm: roadDistKm.toFixed(2),
+        etaMin,
+        fallbackRoute,
+      })
+
+      // Clean up previous routing control before creating a new one
+      if (routingControlRef.current) {
+        try {
+          map.removeControl(routingControlRef.current)
+        } catch (e) {}
+        routingControlRef.current = null
+      }
+
+      // Initialize OSRM routing control
+      const hasRouting = await ensureRoutingMachine()
+      if (hasRouting && isMountedRef.current) {
+        try {
+          const control = window.L.Routing.control({
+            waypoints: [
+              window.L.latLng(incLat, incLng),
+              window.L.latLng(hospitalCoord[0], hospitalCoord[1]),
+            ],
+            router: window.L.Routing.osrmv1({
+              serviceUrl: 'https://router.project-osrm.org/route/v1',
+            }),
+            lineOptions: {
+              styles: [
+                {
+                  color: '#00ffcc', // High-contrast luminous cyan
+                  weight: 4,
+                  opacity: 0.9,
+                  dashArray: '6, 6',
+                  lineCap: 'round',
+                },
+              ],
+              extendToWaypoints: true,
+              missingRouteStyles: [
+                {
+                  color: '#00ffcc',
+                  weight: 4,
+                  opacity: 0.9,
+                  dashArray: '6, 6',
+                  lineCap: 'round',
+                },
+              ],
+            },
+            show: false,
+            addWaypoints: false,
+            routeWhileDragging: false,
+            fitSelectedRoutes: false,
+            showAlternatives: false,
+            createMarker: () => null,
+          })
+
+          control.addTo(map)
+          routingControlRef.current = control
+        } catch (err) {
+          console.warn('[C4ISR] OSRM Control init fallback:', err)
+        }
+      }
+    }
+
+    resolveDispatch()
+
+    // Proper Leaflet control removal on unmount or incident change
+    return () => {
+      isMountedRef.current = false
+      abortController.abort()
+      if (routingControlRef.current) {
+        try {
+          map.removeControl(routingControlRef.current)
+        } catch (e) {}
+        routingControlRef.current = null
+      }
+    }
+  }, [incidentKey, incLat, incLng, map])
+
+  return null
+})
+
+// =============================================================================
+// 4.5 CANONICAL TACTICAL TRANSIT ROUTES & DEMO FIELD UNITS
+// =============================================================================
+const ROUTE_A_WAYPOINTS = TACTICAL_WAYPOINTS?.ROUTE_A_MEDICAL || [
+  [31.4920, 34.4320],
+  [31.4985, 34.4410],
+  [31.5050, 34.4490],
+  [31.5125, 34.4533],
+  [31.5190, 34.4580],
+  [31.5240, 34.4640],
+]
+
+const ROUTE_B_WAYPOINTS = TACTICAL_WAYPOINTS?.ROUTE_B_CIVIL_DEFENSE || [
+  [31.5280, 34.4320],
+  [31.5220, 34.4390],
+  [31.5170, 34.4460],
+  [31.5125, 34.4533],
+  [31.5060, 34.4620],
+  [31.4990, 34.4710],
+]
+
+const DEFAULT_FIELD_UNITS = [
+  {
+    id: 'UNIT-BRAVO-01',
+    callsign: 'RAPID-CD-01',
+    type: 'CivilDefense',
+    lat: 31.5280,
+    lng: 34.4320,
+    speed: 56,
+    heading: 142,
+    status: 'TRANSIT ROUTE B',
+    agencyColor: '#00ffcc',
+    routeId: 'ROUTE_B',
+    currentWaypointIndex: 0,
+  },
+  {
+    id: 'UNIT-ALPHA-02',
+    callsign: 'MEDEVAC-02',
+    type: 'Hospital',
+    lat: 31.4920,
+    lng: 34.4320,
+    speed: 48,
+    heading: 52,
+    status: 'TRANSIT ROUTE A',
+    agencyColor: '#ff3399',
+    routeId: 'ROUTE_A',
+    currentWaypointIndex: 0,
+  },
+  {
+    id: 'UNIT-TACTICAL-03',
+    callsign: 'PATROL-SWAT-03',
+    type: 'Police',
+    lat: 31.5125,
+    lng: 34.4533,
+    speed: 0,
+    heading: 0,
+    status: 'PERIMETER HOLD',
+    agencyColor: '#0077ff',
+    routeId: 'STATIC',
+    currentWaypointIndex: 0,
+  },
+]
+
+// =============================================================================
+// 5. MAIN ENTERPRISE TACTICAL TOPOGRAPHICAL MAP (C4ISR / BMS)
+// =============================================================================
 export const EnterpriseMap = ({
   incidents = [],
   activeIncident,
   onSelectIncident,
+  onRoutingResolved,
+  liveUnits,
+  setLiveUnits,
+  isTargetingMode = false,
+  onLocationAcquired,
+  acquiredCoords = null,
+  children,
 }) => {
-  const { t, i18n } = useTranslation()
-  const isArabic = i18n.language?.startsWith('ar')
 
-  const mapContainerRef = useRef(null)
-  const mapRef = useRef(null)
-  const incidentMarkersRef = useRef([])
-  const hospitalMarkerRef = useRef(null)
+  const defaultCenter = useMemo(() => [31.5125, 34.4533], [])
+  const targetCoordinates = useMemo(() => {
+    if (!activeIncident) return defaultCenter
+    const lat = activeIncident.latitude || activeIncident.lat || defaultCenter[0]
+    const lng = activeIncident.longitude || activeIncident.lng || defaultCenter[1]
+    return [lat, lng]
+  }, [
+    activeIncident?.id,
+    activeIncident?.latitude,
+    activeIncident?.longitude,
+    activeIncident?.lat,
+    activeIncident?.lng,
+    defaultCenter,
+  ])
 
-  // Map state
-  const [activeLayer, setActiveLayer] = useState('tactical') // 'tactical' | 'satellite'
-  const [osintTelemetry, setOsintTelemetry] = useState(null)
-  const [mapLoaded, setMapLoaded] = useState(false)
-  const [cursorCoords, setCursorCoords] = useState({ lat: '31.51250', lng: '34.45330' })
-  const [zoomLevel, setZoomLevel] = useState('13.0')
+  const [telemetry, setTelemetry] = useState(null)
+  const [internalUnits, setInternalUnits] = useState(DEFAULT_FIELD_UNITS)
 
-  // Satellite config from provider
-  const satelliteConfig = getSatelliteConfig()
+  // Use external units from useLiveFeed if provided, otherwise internalUnits
+  const currentUnits = liveUnits && liveUnits.length > 0 ? liveUnits : internalUnits
 
-  // Default coordinate center (Palestine / Gaza sector)
-  const defaultCenter = [34.4533, 31.5125] // [lng, lat]
-  const incLat = activeIncident ? (activeIncident.latitude || activeIncident.lat) : null
-  const incLng = activeIncident ? (activeIncident.longitude || activeIncident.lng) : null
-  const targetCoordinates = (incLat && incLng)
-    ? [incLng, incLat]
-    : incidents[0]
-    ? [incidents[0].longitude || incidents[0].lng, incidents[0].latitude || incidents[0].lat]
-    : defaultCenter
+  // Live Simulation: Advance Unit point-by-point along Route B every 2000ms
+  const currentStepRef = useRef(0)
+  const isMovingForwardRef = useRef(true)
 
-  // Bounding box boundary guard
-  const isOutsideLevant = targetCoordinates && (
-    targetCoordinates[0] < LEVANT_BBOX.minLng ||
-    targetCoordinates[0] > LEVANT_BBOX.maxLng ||
-    targetCoordinates[1] < LEVANT_BBOX.minLat ||
-    targetCoordinates[1] > LEVANT_BBOX.maxLat
+  useEffect(() => {
+    const route = ROUTE_B_WAYPOINTS
+    if (!route || route.length === 0) return
+
+    const intervalId = setInterval(() => {
+      let nextStep = currentStepRef.current + (isMovingForwardRef.current ? 1 : -1)
+      if (nextStep >= route.length) {
+        nextStep = route.length - 2
+        isMovingForwardRef.current = false
+      } else if (nextStep < 0) {
+        nextStep = 1
+        isMovingForwardRef.current = true
+      }
+      currentStepRef.current = nextStep
+      const [nextLat, nextLng] = route[nextStep]
+
+      const updateUnitsList = (prevUnits) => {
+        if (!prevUnits || prevUnits.length === 0) return prevUnits
+        return prevUnits.map((u) => {
+          if (u.id === 'UNIT-BRAVO-01' || u.routeId === 'ROUTE_B') {
+            return {
+              ...u,
+              lat: nextLat,
+              lng: nextLng,
+              currentWaypointIndex: nextStep,
+              status: `TRANSIT ROUTE B [WP ${nextStep + 1}/${route.length}]`,
+              lastUpdated: Date.now(),
+            }
+          }
+          return u
+        })
+      }
+
+      if (typeof setLiveUnits === 'function') {
+        setLiveUnits(updateUnitsList)
+      } else {
+        setInternalUnits(updateUnitsList)
+      }
+    }, 2000)
+
+    // Critical Requirement: Must include clearInterval cleanup function in useEffect return statement
+    return () => {
+      clearInterval(intervalId)
+    }
+  }, [setLiveUnits])
+
+  const handleTelemetry = useCallback(
+    (data) => {
+      setTelemetry((prev) => {
+        if (
+          prev &&
+          prev.hospitalName === data.hospitalName &&
+          prev.distanceKm === data.distanceKm &&
+          prev.etaMin === data.etaMin
+        ) {
+          return prev
+        }
+        return data
+      })
+      onRoutingResolved?.(data)
+    },
+    [onRoutingResolved]
   )
 
-  // =============================================================================
-  // 1. INITIALIZE MAPLIBRE GL INSTANCE WITH CUSTOM INDEXEDDB PMTILES PROTOCOL
-  // =============================================================================
-  useEffect(() => {
-    if (!mapContainerRef.current || mapRef.current) return
-
-    // Register absolute runtime PMTiles source with IndexedDB caching
-    if (typeof window !== 'undefined') {
-      const origin = window.location.origin
-      const regionalArchive = `${origin}/tiles/basemap.pmtiles`
-      const globalArchive = `${origin}/tiles/basemap_global_z0-6.pmtiles`
-
-      protocol.add(new pmtiles.PMTiles(new IndexedDBSource(regionalArchive)))
-      protocol.add(new pmtiles.PMTiles(new IndexedDBSource(globalArchive)))
-    }
-
-    const map = new maplibregl.Map({
-      container: mapContainerRef.current,
-      style: '/styles/tactical-dark.json',
-      center: targetCoordinates,
-      zoom: 13,
-      minZoom: 2,
-      maxZoom: 18,
-      attributionControl: false,
-    })
-
-    // Compliant Bottom-Right Attribution Control
-    map.addControl(
-      new maplibregl.AttributionControl({
-        compact: true,
-        customAttribution: [
-          'EOA OSINT',
-          'OpenStreetMap contributors',
-          'Protomaps',
-          satelliteConfig.isAvailable ? satelliteConfig.attribution : 'Satellite Inactive',
-        ],
-      }),
-      'bottom-right'
-    )
-
-    // Navigation Controls (Zoom / Pitch / Compass)
-    map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'top-left')
-
-    map.on('load', () => {
-      // Add raster satellite layer source if available
-      if (satelliteConfig.isAvailable && satelliteConfig.tiles.length > 0) {
-        map.addSource('satellite-source', {
-          type: 'raster',
-          tiles: satelliteConfig.tiles,
-          tileSize: satelliteConfig.tileSize,
-          maxzoom: satelliteConfig.maxZoom,
-          attribution: satelliteConfig.attribution,
-        })
-
-        map.addLayer(
-          {
-            id: 'satellite-layer',
-            type: 'raster',
-            source: 'satellite-source',
-            layout: {
-              visibility: 'none',
-            },
-            paint: {
-              'raster-opacity': 0.95,
-            },
-          },
-          'pois_emergency'
-        )
-      }
-
-      // Add GeoJSON source and layer for dynamic dispatch route
-      map.addSource('osint-route', {
-        type: 'geojson',
-        data: {
-          type: 'FeatureCollection',
-          features: [],
-        },
-      })
-
-      map.addLayer({
-        id: 'osint-route-glow',
-        type: 'line',
-        source: 'osint-route',
-        layout: {
-          'line-join': 'round',
-          'line-cap': 'round',
-        },
-        paint: {
-          'line-color': '#00ffcc',
-          'line-width': 8,
-          'line-opacity': 0.35,
-          'line-blur': 3,
-        },
-      })
-
-      map.addLayer({
-        id: 'osint-route-core',
-        type: 'line',
-        source: 'osint-route',
-        layout: {
-          'line-join': 'round',
-          'line-cap': 'round',
-        },
-        paint: {
-          'line-color': '#00ffcc',
-          'line-width': 4.5,
-          'line-opacity': 0.95,
-        },
-      })
-
-      mapRef.current = map
-      setMapLoaded(true)
-      setZoomLevel(map.getZoom().toFixed(1))
-      map.resize()
-
-      map.on('mousemove', (e) => {
-        setCursorCoords({
-          lat: e.lngLat.lat.toFixed(5),
-          lng: e.lngLat.lng.toFixed(5),
-        })
-      })
-
-      map.on('zoom', () => {
-        setZoomLevel(map.getZoom().toFixed(1))
-      })
-    })
-
-    const handleResize = () => {
-      map.resize()
-    }
-    window.addEventListener('resize', handleResize)
-
-    return () => {
-      window.removeEventListener('resize', handleResize)
-      map.remove()
-      mapRef.current = null
-    }
-  }, [])
-
-  // =============================================================================
-  // 2. LAYER VISIBILITY SWITCH (TACTICAL DARK VECTOR vs. SATELLITE RASTER)
-  // =============================================================================
-  useEffect(() => {
-    const map = mapRef.current
-    if (!map || !mapLoaded) return
-
-    if (map.getLayer('satellite-layer')) {
-      const visibility = activeLayer === 'satellite' ? 'visible' : 'none'
-      map.setLayoutProperty('satellite-layer', 'visibility', visibility)
-    }
-  }, [activeLayer, mapLoaded])
-
-  // =============================================================================
-  // 3. CAMERA FLY-TO CONTROLLER
-  // =============================================================================
-  useEffect(() => {
-    const map = mapRef.current
-    if (!map || !targetCoordinates || !targetCoordinates[0]) return
-
-    try {
-      map.flyTo({
-        center: targetCoordinates,
-        zoom: 15.5,
-        duration: 1400,
-        essential: true,
-      })
-    } catch (err) {
-      map.setCenter(targetCoordinates)
-    }
-  }, [targetCoordinates[0], targetCoordinates[1]])
-
-  // =============================================================================
-  // 4. TEMPORARY PUBLIC OSINT & ROUTING RESOLUTION (PLAIN FETCH + GEOJSON LAYER)
-  // Scheduled for Phase 2 replacement by local PostGIS + OSRM container (ADR-0003)
-  // =============================================================================
-  useEffect(() => {
-    const map = mapRef.current
-    if (!map || !mapLoaded) return
-
-    const incLat = activeIncident ? (activeIncident.latitude || activeIncident.lat) : null
-    const incLng = activeIncident ? (activeIncident.longitude || activeIncident.lng) : null
-
-    if (!activeIncident || !incLat || !incLng) {
-      // Clear route and hospital marker
-      const source = map.getSource('osint-route')
-      if (source) {
-        source.setData({ type: 'FeatureCollection', features: [] })
-      }
-      if (hospitalMarkerRef.current) {
-        hospitalMarkerRef.current.remove()
-        hospitalMarkerRef.current = null
-      }
-      setOsintTelemetry(null)
-      return
-    }
-
-    const abortController = new AbortController()
-
-    // Temporary feature flag: VITE_FEATURE_TEMP_PUBLIC_OSINT (default: true)
-    const enableTempOSINT = import.meta.env.VITE_FEATURE_TEMP_PUBLIC_OSINT !== 'false'
-
-    const resolveDispatchRoute = async () => {
-      let hospitalCoord = null // [lat, lng]
-      let hospitalName = isArabic ? 'مركز طوارئ طبي (رصد مكاني)' : 'Emergency Trauma Center (OSINT Discovered)'
-
-      // A) Query Overpass if enabled
-      if (enableTempOSINT) {
-        try {
-          const overpassQuery = `[out:json][timeout:5];(node["amenity"="hospital"](around:5000,${incLat},${incLng});way["amenity"="hospital"](around:5000,${incLat},${incLng}););out center;`
-          const overpassUrl = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(overpassQuery)}`
-
-          const res = await fetch(overpassUrl, { signal: abortController.signal })
-          if (res.ok) {
-            const data = await res.json()
-            if (data?.elements?.length > 0) {
-              let minDistance = Infinity
-              let closest = null
-              for (const el of data.elements) {
-                const elLat = el.lat || el.center?.lat
-                const elLng = el.lon || el.center?.lon
-                if (elLat && elLng) {
-                  const dist = calculateDistanceKm(elLat, elLng, incLat, incLng)
-                  if (dist < minDistance) {
-                    minDistance = dist
-                    closest = el
-                  }
-                }
-              }
-              if (closest) {
-                hospitalCoord = [closest.lat || closest.center?.lat, closest.lon || closest.center?.lon]
-                hospitalName =
-                  (isArabic ? closest.tags?.['name:ar'] : closest.tags?.['name:en']) ||
-                  closest.tags?.name ||
-                  hospitalName
-              }
-            }
-          }
-        } catch (err) {
-          // Fall through to local geometric fallback
-        }
-      }
-
-      // Local fallback coordinates if offline, timed out, or not found
-      if (!hospitalCoord) {
-        hospitalCoord = [incLat + 0.0115, incLng - 0.0142]
-      }
-
-      // B) Query OSRM route or compute geometric fallback
-      let routeGeoJSON = null
-      let routeDistanceKm = null
-      let routeEtaMin = null
-
-      if (enableTempOSINT) {
-        try {
-          const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${hospitalCoord[1]},${hospitalCoord[0]};${incLng},${incLat}?overview=full&geometries=geojson`
-          const res = await fetch(osrmUrl, { signal: abortController.signal })
-          if (res.ok) {
-            const data = await res.json()
-            if (data?.routes?.[0]?.geometry) {
-              const route = data.routes[0]
-              routeGeoJSON = route.geometry
-              routeDistanceKm = (route.distance / 1000).toFixed(2)
-              routeEtaMin = Math.max(1.5, route.duration / 60).toFixed(1)
-            }
-          }
-        } catch (err) {
-          // Fall through to geometric fallback
-        }
-      }
-
-      // Local calculated orthogonal route if OSRM was unavailable or air-gapped
-      if (!routeGeoJSON) {
-        const coords = generateFallbackRoute(hospitalCoord[0], hospitalCoord[1], incLat, incLng)
-        routeGeoJSON = {
-          type: 'LineString',
-          coordinates: coords,
-        }
-        const directDist = calculateDistanceKm(hospitalCoord[0], hospitalCoord[1], incLat, incLng)
-        routeDistanceKm = Math.max(0.8, directDist * 1.3).toFixed(2)
-        routeEtaMin = Math.max(1.5, (parseFloat(routeDistanceKm) / 48) * 60).toFixed(1)
-      }
-
-      // Update MapLibre GeoJSON Source
-      const source = map.getSource('osint-route')
-      if (source) {
-        source.setData({
-          type: 'FeatureCollection',
-          features: [
-            {
-              type: 'Feature',
-              geometry: routeGeoJSON,
-              properties: {},
-            },
-          ],
-        })
-      }
-
-      // Render or Update Hospital Marker
-      if (hospitalMarkerRef.current) {
-        hospitalMarkerRef.current.remove()
-      }
-
-      const hospEl = document.createElement('div')
-      hospEl.className = 'hospital-tactical-marker cursor-pointer'
-      hospEl.style.width = '40px'
-      hospEl.style.height = '40px'
-      hospEl.innerHTML = `
-        <div class="relative flex items-center justify-center">
-          <div class="absolute w-12 h-12 rounded-full border-2 border-rose-500 animate-pulse-ring"></div>
-          <div class="w-10 h-10 rounded-full bg-rose-600 border-2 border-white flex items-center justify-center shadow-2xl shadow-black transform hover:scale-110 transition-transform">
-            <svg class="w-6 h-6 text-white" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M9 3h6v6h6v6h-6v6H9v-6H3V9h6V3z"/>
-            </svg>
-          </div>
-        </div>
-      `
-
-      const popupHtml = `
-        <div class="p-1 min-w-[220px] text-white font-sans">
-          <div class="flex items-center gap-2 border-b border-slate-700 pb-2 mb-2">
-            <span class="p-1 rounded bg-rose-600 text-white font-bold text-xs">EMS</span>
-            <span class="font-extrabold text-sm text-white">${hospitalName}</span>
-          </div>
-          <div class="text-xs text-slate-200 space-y-1">
-            <div class="flex items-center justify-between">
-              <span class="text-slate-400">${t('routing.distance')}:</span>
-              <span class="font-mono font-bold text-white">${routeDistanceKm} km</span>
-            </div>
-            <div class="flex items-center justify-between">
-              <span class="text-slate-400">${t('routing.eta')}:</span>
-              <span class="font-mono font-extrabold text-yellow-400 text-sm">${routeEtaMin} ${isArabic ? 'دقيقة' : 'min'}</span>
-            </div>
-          </div>
-        </div>
-      `
-
-      const hospMarker = new maplibregl.Marker({ element: hospEl, anchor: 'center' })
-        .setLngLat([hospitalCoord[1], hospitalCoord[0]])
-        .setPopup(new maplibregl.Popup({ offset: 25, closeButton: true }).setHTML(popupHtml))
-        .addTo(map)
-
-      hospitalMarkerRef.current = hospMarker
-
-      setOsintTelemetry({
-        hospitalCoord,
-        hospitalName,
-        distanceKm: routeDistanceKm,
-        etaMin: routeEtaMin,
-      })
-    }
-
-    resolveDispatchRoute()
-
-    return () => {
-      abortController.abort()
-    }
-  }, [activeIncident?.id, activeIncident?.latitude, activeIncident?.lat, activeIncident?.longitude, activeIncident?.lng, mapLoaded, isArabic])
-
-  // =============================================================================
-  // 5. RENDER ACTIVE EMERGENCY INCIDENTS AS TACTICAL HIGH-CONTRAST MARKERS
-  // =============================================================================
-  useEffect(() => {
-    const map = mapRef.current
-    if (!map || !mapLoaded) return
-
-    // Clear old incident markers
-    incidentMarkersRef.current.forEach((m) => m.remove())
-    incidentMarkersRef.current = []
-
-    incidents.forEach((incident) => {
-      const lat = incident.latitude || incident.lat
-      const lng = incident.longitude || incident.lng
-      if (!lat || !lng) return
-
-      const category = incident.classification?.category || 'General'
-      const severity = incident.classification?.severity_level || 3
-      const isCritical = severity >= 4
-
-      let colorClass = 'bg-cyan-500 border-cyan-300 text-slate-950 font-black'
-      let ringColor = 'border-cyan-400'
-
-      if (severity >= 4) {
-        colorClass = 'bg-red-600 border-white text-white font-black'
-        ringColor = 'border-red-500'
-      } else if (severity === 3) {
-        colorClass = 'bg-amber-500 border-white text-slate-950 font-black'
-        ringColor = 'border-amber-400'
-      } else if (category === 'Security') {
-        colorClass = 'bg-blue-600 border-white text-white font-black'
-        ringColor = 'border-blue-400'
-      }
-
-      const el = document.createElement('div')
-      el.className = 'tactical-incident-marker cursor-pointer'
-      el.style.width = '36px'
-      el.style.height = '36px'
-      el.innerHTML = `
-        <div class="relative flex items-center justify-center">
-          ${isCritical ? `<div class="absolute w-12 h-12 rounded-full border-2 ${ringColor} animate-pulse-ring"></div>` : ''}
-          <div class="w-9 h-9 rounded-full border-2 ${colorClass} flex items-center justify-center shadow-2xl shadow-black transform hover:scale-110 transition-transform">
-            <span class="text-xs font-black">${severity}</span>
-          </div>
-        </div>
-      `
-
-      const dispatchesHtml = incident.dispatches
-        ?.map(
-          (d) =>
-            `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 border border-slate-600 text-white flex items-center gap-1">
-              ${t(`agencies.${d.agency_type}`) || d.agency_type} (${d.required_units || d.units || 1})
-            </span>`
-        )
-        .join('') || ''
-
-      const popupHtml = `
-        <div class="p-1 min-w-[240px] text-white font-sans">
-          <div class="flex items-center justify-between gap-2 border-b border-slate-700 pb-2 mb-2">
-            <span class="font-extrabold text-sm text-white flex items-center gap-1.5">
-              ${incident.location || 'SECTOR ALPHA'}
-            </span>
-            <span class="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider ${
-              severity >= 4
-                ? 'bg-red-600 text-white border border-red-400'
-                : severity === 3
-                ? 'bg-amber-500 text-slate-950 border border-amber-300'
-                : 'bg-emerald-600 text-white'
-            }">
-              ${t(`severities.${severity}`)}
-            </span>
-          </div>
-          <p class="text-xs text-slate-200 mb-2.5 leading-relaxed font-medium">
-            ${incident.classification?.summary || 'Tactical emergency dispatched by AI.'}
-          </p>
-          <div class="space-y-1.5 bg-slate-900 p-2 rounded-lg border border-slate-700">
-            <span class="text-[10px] text-yellow-400 font-extrabold block uppercase tracking-wider">
-              ${t('map.dispatched_forces')}:
-            </span>
-            <div class="flex flex-wrap gap-1.5">
-              ${dispatchesHtml}
-            </div>
-          </div>
-        </div>
-      `
-
-      const popup = new maplibregl.Popup({ offset: 20, closeButton: true }).setHTML(popupHtml)
-
-      const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
-        .setLngLat([lng, lat])
-        .setPopup(popup)
-        .addTo(map)
-
-      el.addEventListener('click', () => {
-        onSelectIncident?.(incident)
-      })
-
-      incidentMarkersRef.current.push(marker)
-    })
-  }, [incidents, mapLoaded, onSelectIncident, t])
-
   return (
-    <div className="relative w-full h-full rounded-2xl overflow-hidden border-2 border-slate-700 shadow-2xl bg-slate-950 font-sans">
-      {/* 1. Top Floating Telemetry & Map HUD Header */}
-      <div className="absolute top-4 start-16 z-20 bg-slate-900/95 backdrop-blur-md px-4 py-2.5 rounded-xl border border-slate-600 text-xs shadow-2xl flex items-center gap-3">
-        <div className="flex items-center gap-2">
-          <Activity className="w-4 h-4 text-cyan-400 animate-pulse" />
-          <span className="font-extrabold text-white uppercase tracking-wider">
-            {t('map.title')}
-          </span>
-        </div>
-        <span className="text-slate-600">|</span>
-        <span className="text-slate-200 font-mono text-[11px] font-semibold">
-          EOA SOVEREIGN GIS (MAPLIBRE + PMTILES)
+    <div className={`relative w-full h-full bg-[#0a0d13] overflow-hidden select-none ${isTargetingMode ? 'cursor-crosshair' : ''}`}>
+      {/* C4ISR Map Viewport Header Indicator (Strict Non-Overlapping Border) */}
+      <div className="absolute top-1 left-2 z-[450] flex items-center gap-2 pointer-events-none font-mono">
+        <span className="flex h-2 w-2 relative">
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75"></span>
+          <span className="relative inline-flex rounded-full h-2 w-2 bg-red-600"></span>
         </span>
-        <span className="text-slate-600">|</span>
-        <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-slate-950/90 border border-emerald-500/50 text-[10px] font-mono text-emerald-400 font-bold shadow-sm">
-          <Database className="w-3 h-3 text-emerald-400" />
-          <span>INDEXEDDB OFFLINE PERSISTED</span>
+        <span className="text-[10px] font-black uppercase tracking-widest text-slate-300 bg-slate-950/80 px-2 py-0.5 rounded border border-slate-700">
+          C4ISR TOPOGRAPHIC VIEWPORT // BBOX ACTIVE
+        </span>
+      </div>
+
+      {/* Targeting Mode Active Banner Indicator */}
+      {isTargetingMode && (
+        <div className="absolute top-2 left-1/2 -translate-x-1/2 z-[460] px-4 py-1.5 bg-red-950/95 border-2 border-red-500 rounded text-red-300 font-mono text-[11px] font-black uppercase tracking-wider flex items-center gap-2 shadow-[0_0_20px_rgba(239,68,68,0.7)] animate-pulse pointer-events-none">
+          <Crosshair className="w-4 h-4 text-red-500 animate-spin" />
+          <span>TARGET ACQUISITION: CLICK ANYWHERE ON MAP TO LOCK COORDINATES</span>
         </div>
-        {activeIncident && (
-          <>
-            <span className="text-slate-600">|</span>
-            <div className="flex items-center gap-1.5">
-              <span className="h-2 w-2 rounded-full bg-red-500 animate-ping" />
-              <span className="text-yellow-400 font-black tracking-wide uppercase truncate max-w-[200px]">
-                {activeIncident.location || 'SECTOR ALPHA'}
-              </span>
-            </div>
-          </>
+      )}
+
+      {/* Primary Leaflet Container with Topographical & Tactical Light Basemaps */}
+      <MapContainer
+        center={targetCoordinates}
+        zoom={13}
+        scrollWheelZoom={true}
+        attributionControl={false}
+        className={`w-full h-full z-0 bg-[#0c1017] ${isTargetingMode ? 'cursor-crosshair' : ''}`}
+      >
+        <MapCameraController targetCoordinates={targetCoordinates} />
+        <TargetingMapEvents isTargetingMode={isTargetingMode} onLocationAcquired={onLocationAcquired} />
+
+        {/* Tactical Coordinate Graticule Overlay */}
+        <MilitaryGraticuleOverlay />
+
+        {/* BaseLayer Switcher: 100% Free Public CDNs (Zero Watermarks, No API Key Required) */}
+        <LayersControl position="topright">
+          {/* 1. High-Res Satellite Reconnaissance (Esri World Imagery) - Default C4ISR Layer */}
+          <LayersControl.BaseLayer checked name="Satellite Recon (Esri)">
+            <TileLayer
+              url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+              maxZoom={19}
+              attribution="&copy; Esri, Maxar, Earthstar Geographics"
+            />
+          </LayersControl.BaseLayer>
+
+          {/* 2. Tactical Navigation (OpenStreetMap Standard) */}
+          <LayersControl.BaseLayer name="Tactical Street (OpenStreetMap)">
+            <TileLayer
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              maxZoom={19}
+              attribution="&copy; OpenStreetMap contributors"
+            />
+          </LayersControl.BaseLayer>
+
+          {/* 3. Tactical Topographical Map (OpenTopoMap) */}
+          <LayersControl.BaseLayer name="Tactical Topo (OpenTopoMap)">
+            <TileLayer
+              url="https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png"
+              maxZoom={17}
+              subdomains="abc"
+              attribution="&copy; OpenTopoMap contributors"
+            />
+          </LayersControl.BaseLayer>
+        </LayersControl>
+
+        {/* OSRM Routing Controller */}
+        <OSINTRoutingMachine
+          activeIncident={activeIncident}
+          onRoutingResolved={handleTelemetry}
+        />
+
+        {/* ============================================================= */}
+        {/* STATIC TACTICAL ROUTES (POLYLINES)                            */}
+        {/* ============================================================= */}
+        {/* Route A (Medical Supply): color #ff3399, weight 4, opacity 0.85 */}
+        <Polyline
+          positions={ROUTE_A_WAYPOINTS}
+          pathOptions={{
+            color: '#ff3399',
+            weight: 4,
+            opacity: 0.85,
+            dashArray: '8, 6',
+            lineCap: 'round',
+          }}
+        />
+
+        {/* Route B (Rapid Civil Defense): color #00ffcc, weight 4, opacity 0.85 */}
+        <Polyline
+          positions={ROUTE_B_WAYPOINTS}
+          pathOptions={{
+            color: '#00ffcc',
+            weight: 4,
+            opacity: 0.85,
+            dashArray: '8, 6',
+            lineCap: 'round',
+          }}
+        />
+
+        {/* Dynamic Incident OSINT Vector (Luminous Cyan) */}
+        {telemetry?.fallbackRoute && (
+          <Polyline
+            positions={telemetry.fallbackRoute}
+            pathOptions={{
+              color: '#00ffcc',
+              weight: 4,
+              opacity: 0.95,
+              dashArray: '4, 4',
+              lineCap: 'round',
+            }}
+          />
         )}
-      </div>
 
-      {/* 2. Tactical BaseLayer Switcher Controller (Top-End) */}
-      <div className="absolute top-4 end-4 z-20 flex items-center bg-slate-900/95 backdrop-blur-md p-1 rounded-xl border border-slate-700 shadow-2xl">
-        <button
-          type="button"
-          onClick={() => setActiveLayer('tactical')}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-            activeLayer === 'tactical'
-              ? 'bg-cyan-500 text-slate-950 shadow-md font-black'
-              : 'text-slate-300 hover:text-white hover:bg-slate-800'
-          }`}
-        >
-          <Layers className="w-3.5 h-3.5" />
-          <span>Tactical Dark (PMTiles)</span>
-        </button>
+        {/* ============================================================= */}
+        {/* LIVE FIELD UNIT TELEMETRY (GLOWING DOTS VIA CIRCLEMARKER)     */}
+        {/* Minimalist high-contrast geometry replacing bulky pins        */}
+        {/* Required: radius={6}, fillColor="#ffffff", weight={2}, fillOpacity={1} */}
+        {/* ============================================================= */}
+        {currentUnits.map((unit) => {
+          const unitColor = unit.agencyColor || '#0077ff'
+          return (
+            <CircleMarker
+              key={unit.id}
+              center={[unit.lat, unit.lng]}
+              radius={6}
+              fillColor="#ffffff"
+              color={unitColor}
+              weight={2}
+              fillOpacity={1}
+            >
+              <Popup>
+                <div className="p-2 font-mono text-[10px] bg-slate-900 text-white rounded border border-slate-700 min-w-[170px]">
+                  <div
+                    className="font-bold flex items-center justify-between border-b border-slate-700 pb-1 mb-1"
+                    style={{ color: unitColor }}
+                  >
+                    <span>{unit.callsign || unit.id}</span>
+                    <span className="text-[8px] px-1 py-0.2 bg-black/90 rounded border border-slate-700 uppercase">
+                      {unit.type}
+                    </span>
+                  </div>
+                  <div className="text-slate-300">
+                    STATUS: <span className="text-emerald-400 font-bold">{unit.status}</span>
+                  </div>
+                  <div className="text-slate-300">
+                    SPEED: <span className="text-white font-bold">{unit.speed} km/h</span>
+                  </div>
+                  <div className="text-cyan-400 text-[9px] mt-1 font-mono">
+                    GRID: {unit.lat.toFixed(4)}°N, {unit.lng.toFixed(4)}°E
+                  </div>
+                </div>
+              </Popup>
+            </CircleMarker>
+          )
+        })}
 
-        <button
-          type="button"
-          onClick={() => setActiveLayer('satellite')}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-            activeLayer === 'satellite'
-              ? 'bg-cyan-500 text-slate-950 shadow-md font-black'
-              : 'text-slate-300 hover:text-white hover:bg-slate-800'
-          }`}
-        >
-          <Eye className="w-3.5 h-3.5" />
-          <span>Satellite</span>
-        </button>
-      </div>
+        {/* Red Target Markers for Incidents */}
+        {incidents.map((inc) => {
+          const lat = inc.latitude || inc.lat
+          const lng = inc.longitude || inc.lng
+          if (!lat || !lng) return null
 
-      {/* 3. Boundary Guard Warning: High-Detail Extract Not Landed */}
-      {isOutsideLevant && (
-        <div className="absolute top-16 start-16 z-20 bg-amber-950/90 border border-amber-500/80 backdrop-blur-md px-3.5 py-2 rounded-xl shadow-2xl flex items-center gap-2.5 text-amber-200 text-xs font-bold animate-fade-in">
-          <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 animate-pulse" />
-          <span>{t('map.low_detail_region')}</span>
-        </div>
-      )}
+          const severity = inc.classification?.severity_level || inc.severity || 3
 
-      {/* 4. Satellite Status & Licensing Notice */}
-      {activeLayer === 'satellite' && (
-        <div className="absolute top-16 end-4 z-20 bg-slate-900/90 border border-slate-700 backdrop-blur-md px-3.5 py-2 rounded-xl shadow-2xl flex items-center gap-2 text-slate-200 text-[11px] font-bold animate-fade-in">
-          <AlertTriangle className="w-4 h-4 text-cyan-400 shrink-0" />
-          <span>{t(satelliteConfig.noticeKey)}</span>
-        </div>
-      )}
-
-      {/* 5. DYNAMIC OSINT ROUTING HUD TELEMETRY CARD */}
-      {osintTelemetry && activeIncident && (
-        <div className="absolute bottom-6 start-4 end-4 md:end-auto md:w-96 z-20 bg-slate-900/95 backdrop-blur-xl p-3.5 rounded-2xl border-2 border-[#00ffcc] shadow-2xl text-xs font-sans animate-fade-in">
-          <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-700">
-            <div className="flex items-center gap-2">
-              <Navigation className="w-4 h-4 text-[#00ffcc] animate-bounce" />
-              <span className="font-black text-white uppercase text-[11px] tracking-wider">
-                {t('routing.autonomous_routing')}
-              </span>
-            </div>
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-[#00ffcc]/20 text-[#00ffcc] border border-[#00ffcc]/40 uppercase">
-              5KM RADIUS
-            </span>
-          </div>
-
-          <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-700">
-            <div className="flex items-center gap-1.5 text-rose-400 font-bold mb-1">
-              <Stethoscope className="w-3.5 h-3.5 shrink-0" />
-              <span className="truncate text-xs font-extrabold text-white">
-                {osintTelemetry.hospitalName}
-              </span>
-            </div>
-            <div className="mt-1 flex items-baseline justify-between">
-              <span className="text-xs text-slate-300 font-bold">
-                {osintTelemetry.distanceKm} km
-              </span>
-              <span className="text-yellow-400 font-black text-base font-mono">
-                {t('routing.eta')}: {osintTelemetry.etaMin} {isArabic ? 'دقيقة' : 'min'}
-              </span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 6. Live Tactical Coordinates & Telemetry Bar */}
-      <div className="absolute bottom-2 start-1/2 -translate-x-1/2 z-10 bg-slate-900/90 backdrop-blur-md px-3 py-1 rounded-lg border border-slate-700/80 shadow-lg text-[10px] font-mono text-slate-300 flex items-center gap-3 select-none pointer-events-none">
-        <div className="flex items-center gap-1.5 text-cyan-400 font-bold">
-          <Crosshair className="w-3 h-3 text-cyan-400" />
-          <span>{t('map.coordinates')}:</span>
-        </div>
-        <span className="font-semibold text-white">
-          {cursorCoords.lat}° N, {cursorCoords.lng}° E
-        </span>
-        <span className="text-slate-600">|</span>
-        <span>ZOOM: <strong className="text-cyan-300">{zoomLevel}</strong></span>
-        <span className="text-slate-600">|</span>
-        <span className="text-slate-400">WGS84</span>
-      </div>
-
-      {/* 7. Primary MapLibre GL DOM Container */}
-      <div ref={mapContainerRef} className="w-full h-full z-0" />
+          return (
+            <Marker
+              key={inc.id || `${lat}-${lng}`}
+              position={[lat, lng]}
+              icon={createMilitaryTargetMarker(severity, inc.id)}
+              eventHandlers={{
+                click: () => onSelectIncident?.(inc),
+              }}
+            >
+              <Popup>
+                <div className="p-2 font-mono text-[11px] bg-slate-900 text-white rounded">
+                  <div className="font-bold text-red-500 mb-1 border-b border-slate-700 pb-1">
+                    TARGET LOCATED // {inc.id}
+                  </div>
+                  <div className="font-bold">{inc.location}</div>
+                  <div className="text-slate-300 text-[10px] mt-1">
+                    {inc.classification?.summary || inc.text}
+                  </div>
+                  <div className="text-cyan-400 text-[10px] mt-1 font-mono">
+                    GRID: {lat.toFixed(4)}°N, {lng.toFixed(4)}°E
+                  </div>
+                </div>
+              </Popup>
+            </Marker>
+          )
+        })}
+        {/* Dynamically Acquired Target Marker */}
+        {acquiredCoords && acquiredCoords.lat && acquiredCoords.lng && (
+          <Marker
+            position={[acquiredCoords.lat, acquiredCoords.lng]}
+            icon={createAcquiredTargetMarker()}
+          >
+            <Popup>
+              <div className="p-2 font-mono text-[11px] bg-slate-900 text-white rounded border border-red-500">
+                <div className="font-bold text-red-500 mb-1">DYNAMIC TARGET LOCKED</div>
+                <div className="text-yellow-300 font-bold">
+                  {Number(acquiredCoords.lat).toFixed(6)}°N, {Number(acquiredCoords.lng).toFixed(6)}°E
+                </div>
+              </div>
+            </Popup>
+          </Marker>
+        )}
+        {/* Isolated Overlays / Camera Layers */}
+        {children}
+      </MapContainer>
     </div>
   )
 }
-
-export default EnterpriseMap

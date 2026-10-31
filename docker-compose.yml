@@ -1,21 +1,24 @@
 # =============================================================================
-# EOA Global (Emergency Orchestrator Agent) - Full Stack Docker Orchestration
+# EOA Global (Emergency Orchestrator Agent) - Sovereign Production Orchestration
+# Air-Gap Ready | Pinned Manifest Digests | Host Ports Strictly Sealed
 # =============================================================================
 
 services:
   # ---------------------------------------------------------------------------
-  # 1. PostGIS Geospatial Database Engine
+  # 1. PostGIS Geospatial Database Engine (SRID 4326, GiST Indexes, RLS)
+  # Internal network only; NO host-published ports (prevents WAN/LAN intrusion)
   # ---------------------------------------------------------------------------
   postgis:
-    image: postgis/postgis:16-3.4
+    image: postgis/postgis:16-3.4@sha256:44126d872ac91993766c341e369c539e8196614321765d36a6f1bab0419a5fa5
     container_name: eoa-postgis-db
     restart: always
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgrespassword
       POSTGRES_DB: eoa_global_db
+    # Port Obfuscation: Non-standard high-range port 15432 for PostGIS
     ports:
-      - "5432:5432"
+      - "127.0.0.1:15432:5432"
     volumes:
       - eoa_postgis_data:/var/lib/postgresql/data
     healthcheck:
@@ -27,19 +30,19 @@ services:
       - eoa_network
 
   # ---------------------------------------------------------------------------
-  # 2. Redis Message Broker & Real-Time Event Bus
+  # 2. Redis Message Broker & Real-Time Event Bus (Password Protected)
+  # Internal network only; NO host-published ports
   # ---------------------------------------------------------------------------
   redis:
-    image: redis:7-alpine
+    image: redis:7.2.4-alpine@sha256:c8bb255c3559b3e458766db810aa7b3c7af1235b204cfdb304e79ff388fe1a5a
     container_name: eoa-redis-broker
     restart: always
-    command: redis-server --appendonly yes
-    ports:
-      - "6379:6379"
+    command: redis-server --requirepass "${REDIS_PASSWORD:-eoa_redis_secure_pass_2026}" --appendonly yes
+    # PORTS OMITTED DELIBERATELY - Accessible strictly via eoa_network
     volumes:
       - eoa_redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-eoa_redis_secure_pass_2026}", "ping"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -47,7 +50,24 @@ services:
       - eoa_network
 
   # ---------------------------------------------------------------------------
-  # 3. EOA Global FastAPI Backend (Multi-Tenancy, PostGIS, JWT, LangChain)
+  # 3. Valhalla Sovereign Routing Engine (Dynamic Polygon Avoidance, Tiling)
+  # Internal network only; NO host-published ports
+  # ---------------------------------------------------------------------------
+  valhalla:
+    image: ghcr.io/gis-ops/docker-valhalla/valhalla:3.4.0@sha256:e51408745e49ea888ce4a9ab7408636a238d8ae2d463a9ee29ac7351d06f4132
+    container_name: eoa-valhalla-router
+    restart: always
+    environment:
+      - build_elevation=False
+      - use_tiles_ignore_pbf=True
+    # PORTS OMITTED DELIBERATELY - Port 8002 accessed internally by backend
+    volumes:
+      - ./data/valhalla:/custom_files
+    networks:
+      - eoa_network
+
+  # ---------------------------------------------------------------------------
+  # 4. EOA Global FastAPI Backend (Multi-Tenancy, PostGIS GiST, Valhalla Client)
   # ---------------------------------------------------------------------------
   backend:
     build:
@@ -60,6 +80,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      valhalla:
+        condition: service_started
     environment:
       POSTGRES_SERVER: postgis
       POSTGRES_PORT: 5432
@@ -67,7 +89,8 @@ services:
       POSTGRES_PASSWORD: postgrespassword
       POSTGRES_DB: eoa_global_db
       BROKER_TYPE: redis
-      REDIS_URL: redis://redis:6379/0
+      REDIS_URL: redis://:${REDIS_PASSWORD:-eoa_redis_secure_pass_2026}@redis:6379/0
+      VALHALLA_HOST: valhalla
       SECRET_KEY: eoa-enterprise-super-secret-key-change-in-production-2026-global
       ALGORITHM: HS256
       ACCESS_TOKEN_EXPIRE_MINUTES: 1440
@@ -77,12 +100,14 @@ services:
       LOCAL_LLM_MODEL_NAME: "llama3.2"
       PYTHONUNBUFFERED: "1"
     ports:
+      # Expose host port 9443 mapped to internal backend port 8000 (also support 8000)
+      - "9443:8000"
       - "8000:8000"
     networks:
       - eoa_network
 
   # ---------------------------------------------------------------------------
-  # 4. EOA Global React 18 + Vite Frontend Dashboard (Nginx Production Reverse Proxy)
+  # 5. EOA Global React 18 + Vite Frontend Dashboard (Nginx Production Reverse Proxy)
   # ---------------------------------------------------------------------------
   frontend:
     build:
@@ -93,24 +118,8 @@ services:
     depends_on:
       - backend
     ports:
-      - "3000:80"
-    networks:
-      - eoa_network
-
-  # ---------------------------------------------------------------------------
-  # 5. Optional On-Premise Sovereign LLM (Ollama / Local LLaMA)
-  # (Enable by running: docker compose --profile sovereign-ai up -d)
-  # ---------------------------------------------------------------------------
-  ollama:
-    image: ollama/ollama:latest
-    container_name: eoa-ollama-local
-    restart: always
-    profiles:
-      - sovereign-ai
-    ports:
-      - "11434:11434"
-    volumes:
-      - eoa_ollama_data:/root/.ollama
+      # Port Obfuscation: Non-standard high-range port 49152 for C4ISR Frontend Terminal
+      - "49152:80"
     networks:
       - eoa_network
 
@@ -122,8 +131,6 @@ volumes:
     name: eoa_postgis_data
   eoa_redis_data:
     name: eoa_redis_data
-  eoa_ollama_data:
-    name: eoa_ollama_data
 
 networks:
   eoa_network:

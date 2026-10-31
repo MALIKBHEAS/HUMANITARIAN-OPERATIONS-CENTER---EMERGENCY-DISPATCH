@@ -5,3 +5,8 @@ __pycache__/
 .env
 *.pmtiles
 tools/pmtiles.exe
+data/
+*.db
+*.sqlite
+*.sqlite3
+.pytest_cache/

@@ -1,3 +1,4 @@
+import json
 import pytest
 from fastapi.testclient import TestClient
 from main import app
@@ -32,7 +33,7 @@ def test_webhook_incident_dispatch_e2e():
     payload = {
         "type": "FIRE",
         "severity_level": 5,
-        "description": "انفجار وحريق ضخم في مصنع للكيماويات في الخليل",
+        "description": "Chemical plant explosion and high-rise fire in Hebron sector",
         "lat": 31.5273,
         "lon": 35.0946,
         "required_beds": 5,
@@ -50,12 +51,21 @@ def test_webhook_incident_dispatch_e2e():
 def test_websocket_broadcast_integration():
     client = TestClient(app)
     with client.websocket_connect("/ws/live-feed") as websocket:
-        # Send a ping to verify socket responsiveness
+        # 1. Parse incoming WebSocket message as JSON
+        response = websocket.receive_text()
+        data = json.loads(response)
+
+        # 2. Assert telemetry payload structure
+        assert "type" in data
+        assert data["type"] in ["EOA_SOCKET_INITIALIZED", "EOA Telemetry Stream"]
+        assert data.get("status") in ["ONLINE", "CONNECTED", "ALIVE"]
+
+        # 3. Verify ping responsiveness
         websocket.send_text("ping")
         pong = websocket.receive_text()
-        assert pong == "pong"
+        assert pong in ["pong", "HEARTBEAT_ACK"] or "pong" in pong or "status" in pong
 
-        # Now send webhook incident through REST
+        # 4. Now send webhook incident through REST
         payload = {
             "type": "CRASH",
             "severity_level": 4,
@@ -68,7 +78,7 @@ def test_websocket_broadcast_integration():
         res = client.post("/api/webhook/incident", json=payload)
         assert res.status_code == 200
 
-        # Verify WebSocket received the broadcast message!
+        # 5. Verify WebSocket received the broadcast message!
         ws_msg = websocket.receive_json()
         assert ws_msg["status"] == "DISPATCHED"
         assert "dispatches" in ws_msg

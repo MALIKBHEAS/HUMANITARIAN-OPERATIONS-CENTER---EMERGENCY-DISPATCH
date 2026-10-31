@@ -5,20 +5,23 @@ from database import get_db
 from models import Hospital, PoliceStation
 from schemas import HospitalResponse, PoliceStationResponse, ResourcesSummaryResponse
 
-router = APIRouter()
+router = APIRouter(tags=["Emergency Resources"])
 
+@router.get("/resources/hospitals", response_model=List[HospitalResponse])
 @router.get("/hospitals", response_model=List[HospitalResponse])
 def get_hospitals(db: Session = Depends(get_db)):
     """Retrieves all registered hospitals and live ICU bed availability."""
     hospitals = db.query(Hospital).all()
     return hospitals
 
+@router.get("/resources/police", response_model=List[PoliceStationResponse])
 @router.get("/police", response_model=List[PoliceStationResponse])
 def get_police_stations(db: Session = Depends(get_db)):
     """Retrieves all registered police stations and active patrol readiness."""
     police_stations = db.query(PoliceStation).all()
     return police_stations
 
+@router.get("/resources/all", response_model=ResourcesSummaryResponse)
 @router.get("/all", response_model=ResourcesSummaryResponse)
 def get_all_resources(db: Session = Depends(get_db)):
     """Consolidated summary of all available emergency institutions."""

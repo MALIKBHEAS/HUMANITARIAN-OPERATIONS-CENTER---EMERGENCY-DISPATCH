@@ -2,7 +2,7 @@ import React from 'react';
 import { Shield, AlertTriangle, Activity, LogOut, Siren, Wifi } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
-export default function DashboardStats({ incidents = [], wsStatus = 'DISCONNECTED' }) {
+export default function DashboardStats({ incidents = [], wsStatus = 'DISCONNECTED', onTriggerSOS }) {
   const { user, logout } = useAuth();
 
   const totalIncidents = incidents.length;
@@ -89,6 +89,17 @@ export default function DashboardStats({ incidents = [], wsStatus = 'DISCONNECTE
             </div>
           </div>
         </div>
+
+        {/* Immediate SOS / Duress Button */}
+        <button
+          type="button"
+          onClick={onTriggerSOS}
+          title="Broadcast Critical Duress / SOS Alert"
+          className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 text-white font-mono font-black text-xs uppercase border-2 border-red-400 shadow-xl shadow-red-950 animate-pulse hover:animate-none active:scale-95 transition-all cursor-pointer"
+        >
+          <span className="w-2 h-2 rounded-full bg-white animate-ping" />
+          <span>[SOS / PANIC]</span>
+        </button>
 
       </div>
 

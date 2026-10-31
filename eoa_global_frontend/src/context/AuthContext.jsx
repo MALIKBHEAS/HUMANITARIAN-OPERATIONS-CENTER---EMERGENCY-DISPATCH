@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react'
+import { API_BASE_URL } from '../services/api'
 
 const AuthContext = createContext(null)
 
@@ -52,7 +53,7 @@ export const AuthProvider = ({ children }) => {
       formData.append('client_id', targetTenantId)
     }
 
-    const response = await fetch('/api/v1/auth/login', {
+    const response = await fetch(`${API_BASE_URL}/v1/auth/login`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -96,7 +97,7 @@ export const AuthProvider = ({ children }) => {
       role: 'DISPATCHER',
     }
 
-    const response = await fetch('/api/v1/auth/sso/login', {
+    const response = await fetch(`${API_BASE_URL}/v1/auth/sso/login`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

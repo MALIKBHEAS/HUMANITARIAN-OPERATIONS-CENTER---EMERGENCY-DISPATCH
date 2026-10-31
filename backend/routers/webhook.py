@@ -19,7 +19,7 @@ from agent_engine import run_eoa_agent
 from ws_manager import ws_manager
 
 logger = logging.getLogger("webhook_router")
-router = APIRouter(prefix="/api", tags=["Incidents & Webhook"])
+router = APIRouter(tags=["Incidents & Webhook"])
 
 def parse_incident_type(raw_type: str) -> IncidentType:
     """Normalizes string inputs to the IncidentType enum."""

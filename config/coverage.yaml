@@ -1,0 +1,43 @@
+# =============================================================================
+# EOA Global - Operational Coverage Single Source of Truth
+# Derived directly via `osmium fileinfo -e` from israel-and-palestine-latest.osm.pbf
+# =============================================================================
+
+version: "1.0.0"
+region_id: "israel-and-palestine"
+display_name: "Palestine and Israel Sovereign Operational Area"
+source_pbf: "data/osm/israel-and-palestine-latest.osm.pbf"
+replication_base_url: "https://download.geofabrik.de/asia/israel-and-palestine-updates"
+replication_sequence_number: 4932
+osmosis_replication_timestamp: "2026-10-28T21:21:02Z"
+last_updated: "2026-10-29T11:15:43Z"
+
+# Exact Bounding Box from Osmium Fileinfo Header
+bbox:
+  min_lon: 33.999936
+  min_lat: 29.439598
+  max_lon: 35.915310
+  max_lat: 33.454362
+
+# GeoJSON Envelope for Boundary Guard and Spatial Clipping
+envelope_geojson:
+  type: "Polygon"
+  coordinates:
+    - - [33.999936, 29.439598]
+      - [35.915310, 29.439598]
+      - [35.915310, 33.454362]
+      - [33.999936, 33.454362]
+      - [33.999936, 29.439598]
+
+# Boundary Enforcement Rules
+enforcement:
+  api_boundary_guard:
+    enforce_strict_bbox: true
+    out_of_coverage_response:
+      status: 200
+      code: "OUT_OF_COVERAGE"
+      message: "Target coordinates fall outside the high-detail operational coverage area."
+  frontend_guard:
+    show_toast_warning: true
+    toast_message_ar: "تنبيه: الإحداثيات تقع خارج نطاق التغطية التشغيلية للمنظومة"
+    toast_message_en: "Notice: Coordinates fall outside operational coverage boundaries."

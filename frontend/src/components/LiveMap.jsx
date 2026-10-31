@@ -2,6 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import { Shield, Navigation, Building2, Flame } from 'lucide-react';
+import { API_BASE_URL } from '../api';
 
 const DEFAULT_CENTER = [31.5326, 35.0998];
 
@@ -83,7 +84,7 @@ export default function LiveMap({ incidents = [], latestIncident = null }) {
   useEffect(() => {
     const loadResources = async () => {
       try {
-        const res = await fetch('http://127.0.0.1:8000/api/resources/all');
+        const res = await fetch(`${API_BASE_URL}/resources/all`);
         if (res.ok) {
           const data = await res.json();
           setResources({

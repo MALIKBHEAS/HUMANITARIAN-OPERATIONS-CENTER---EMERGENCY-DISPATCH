@@ -52,6 +52,16 @@ class BaseMessageBroker(ABC):
         """Pulls an SOS incident from the task queue."""
         pass
 
+    @abstractmethod
+    async def get_cached_value(self, key: str) -> Optional[str]:
+        """Retrieves a cached string value."""
+        pass
+
+    @abstractmethod
+    async def set_cached_value(self, key: str, value: str, ttl: int = 300) -> None:
+        """Stores a cached string value with TTL."""
+        pass
+
 
 class MemoryMessageBroker(BaseMessageBroker):
     """
@@ -65,6 +75,7 @@ class MemoryMessageBroker(BaseMessageBroker):
         self._channels: Dict[str, Set[asyncio.Queue]] = {}
         self._lock: Optional[asyncio.Lock] = None
         self._is_connected: bool = False
+        self._cache: Dict[str, tuple[str, float]] = {}
 
     @property
     def lock(self) -> asyncio.Lock:
@@ -123,6 +134,19 @@ class MemoryMessageBroker(BaseMessageBroker):
             return await asyncio.wait_for(queue.get(), timeout=timeout)
         except asyncio.TimeoutError:
             return None
+
+    async def get_cached_value(self, key: str) -> Optional[str]:
+        import time
+        if key in self._cache:
+            val, exp = self._cache[key]
+            if time.time() < exp:
+                return val
+            del self._cache[key]
+        return None
+
+    async def set_cached_value(self, key: str, value: str, ttl: int = 300) -> None:
+        import time
+        self._cache[key] = (value, time.time() + ttl)
 
 
 class RedisMessageBroker(BaseMessageBroker):
@@ -194,6 +218,21 @@ class RedisMessageBroker(BaseMessageBroker):
             _, item_data = result
             return json.loads(item_data)
         return None
+
+    async def get_cached_value(self, key: str) -> Optional[str]:
+        if not self._client:
+            return None
+        try:
+            return await self._client.get(key)
+        except Exception:
+            return None
+
+    async def set_cached_value(self, key: str, value: str, ttl: int = 300) -> None:
+        if self._client:
+            try:
+                await self._client.set(key, value, ex=ttl)
+            except Exception:
+                pass
 
 
 class RabbitMQMessageBroker(BaseMessageBroker):
@@ -280,6 +319,12 @@ class RabbitMQMessageBroker(BaseMessageBroker):
             return None
         return None
 
+    async def get_cached_value(self, key: str) -> Optional[str]:
+        return None
+
+    async def set_cached_value(self, key: str, value: str, ttl: int = 300) -> None:
+        pass
+
 
 class BrokerManager:
     """
@@ -326,6 +371,15 @@ class BrokerManager:
         if self._broker:
             await self._broker.disconnect()
             self._broker = None
+
+    async def get_cached_value(self, key: str) -> Optional[str]:
+        if self._broker:
+            return await self._broker.get_cached_value(key)
+        return None
+
+    async def set_cached_value(self, key: str, value: str, ttl: int = 300) -> None:
+        if self._broker:
+            await self._broker.set_cached_value(key, value, ttl)
 
 
 # Global singleton instance

@@ -38,10 +38,13 @@ Valhalla supports geometric exclusion polygons via its `costing_options.auto.exc
 - **Maximum Polygon Vertex Count**: Capped at **32 vertices** per polygon.
 - **Closure Radius Cap**: Maximum hazard buffer radius is capped at **5.0 km** per incident to avoid complete routing graph disconnects.
 
-#### Latency Impact Analysis (Empirical / Validated Profile):
-- **1 Hazard Polygon**: Latency delta < +5 ms (Total route latency ~12-18 ms).
-- **10 Hazard Polygons**: Latency delta < +20 ms (Total route latency ~25-40 ms).
-- **100 Hazard Polygons**: Severe latency degradation (> 350 ms) and high probability of `NoRouteAvailable` routing deadlocks. Hence the engine enforces a strict cap of 25.
+#### Latency Impact Analysis (Empirical Benchmark Results from Tel Aviv -> Jerusalem 65.8 km Route):
+- **Service Limits Parameter**: `max_exclude_polygons_length: 10000` (verified in `valhalla.json:202`).
+- **0 Polygons**: p50 = 100.51 ms | p95 = 134.52 ms (initial cache load).
+- **1 Hazard Polygon**: p50 = 65.23 ms | p95 = 77.64 ms.
+- **10 Hazard Polygons**: p50 = 68.63 ms | p95 = 80.91 ms.
+- **100 Hazard Polygons**: p50 = 65.16 ms | p95 = 89.51 ms.
+- **Operational Recommendation**: Enforce application cap of 25 polygons and 32 vertices per polygon to prevent edge-case path starvation and maintain sub-80ms p95 latency.
 
 ### 4. Levant Operational & Cross-Border Routing Constraints
 1. **Cross-Border Disconnects**: OpenStreetMap tags border checkpoints with `barrier=border_control`, `access=no`, or physical separation fences. Routes between Palestine/Israel, Jordan, and Lebanon cannot cross borders without custom access exemptions.

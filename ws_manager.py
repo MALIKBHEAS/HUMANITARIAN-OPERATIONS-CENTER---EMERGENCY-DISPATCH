@@ -14,8 +14,13 @@ class ConnectionManager:
 
     async def connect(self, websocket: WebSocket) -> None:
         """Accepts and registers a new WebSocket client connection."""
-        await websocket.accept()
-        self.active_connections.append(websocket)
+        try:
+            await websocket.accept()
+        except Exception:
+            # Socket already accepted by route handler
+            pass
+        if websocket not in self.active_connections:
+            self.active_connections.append(websocket)
         logger.info(f"WebSocket client connected. Total active: {len(self.active_connections)}")
 
     def disconnect(self, websocket: WebSocket) -> None:

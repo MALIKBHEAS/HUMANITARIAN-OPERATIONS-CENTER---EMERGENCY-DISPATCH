@@ -32,7 +32,7 @@ services:
       SQLALCHEMY_DATABASE_URL: postgresql://postgres:postgrespassword@postgis:5432/emergency_gis
       PYTHONUNBUFFERED: "1"
     ports:
-      - "8000:8000"
+      - "9443:9443"
 
 volumes:
   postgis_data:

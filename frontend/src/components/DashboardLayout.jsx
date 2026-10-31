@@ -3,6 +3,7 @@ import DashboardStats from './DashboardStats';
 import LiveMap from './LiveMap';
 import IncidentFeed from './IncidentFeed';
 import { useWebSocket } from '../hooks/useWebSocket';
+import { API_BASE_URL, api } from '../api';
 import { Send, X, AlertCircle, Sparkles, CheckCircle2 } from 'lucide-react';
 
 const PRESET_SCENARIOS = [
@@ -64,7 +65,7 @@ const PRESET_SCENARIOS = [
 ];
 
 export default function DashboardLayout() {
-  const { status, incidentHistory, latestIncident } = useWebSocket('ws://127.0.0.1:8000/ws/live-feed');
+  const { status, incidentHistory, latestIncident } = useWebSocket('ws://localhost:9443/ws/live-feed');
   const [isSimulatorOpen, setIsSimulatorOpen] = useState(false);
   const [simForm, setSimForm] = useState(PRESET_SCENARIOS[0]);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -80,7 +81,7 @@ export default function DashboardLayout() {
     setSubmitSuccess(false);
 
     try {
-      const res = await fetch('http://127.0.0.1:8000/api/webhook/incident', {
+      const res = await fetch(`${API_BASE_URL}/webhook/incident`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(simForm),
@@ -103,11 +104,34 @@ export default function DashboardLayout() {
     }
   };
 
+  const handleTriggerSOS = async () => {
+    const confirmed = window.confirm(
+      "CONFIRM CRITICAL SOS BROADCAST?\n\nThis will trigger an immediate DEFCON-1 duress alert and dispatch autonomous emergency units to your operator coordinates."
+    );
+    if (!confirmed) return;
+
+    try {
+      const sosPayload = {
+        type: "SOS_DURESS",
+        severity_level: 5,
+        description: "CRITICAL OPERATOR DURESS / SOS BROADCAST - Immediate emergency assistance required at command station.",
+        lat: 31.5273,
+        lon: 35.0946,
+        required_beds: 5,
+        security_token: "valid_edge_token_sos_override"
+      };
+      await api.sendIncident(sosPayload);
+      alert("CRITICAL SOS BROADCASTED SUCCESSFULLY. Units dispatched.");
+    } catch (err) {
+      alert(`SOS Broadcast failed: ${err.message}`);
+    }
+  };
+
   return (
     <div className="flex flex-col h-screen w-screen bg-slate-950 overflow-hidden font-sans">
       
       {/* Top Tactical Stat Bar */}
-      <DashboardStats incidents={incidentHistory} wsStatus={status} />
+      <DashboardStats incidents={incidentHistory} wsStatus={status} onTriggerSOS={handleTriggerSOS} />
 
       {/* Main Operational Split View */}
       <div className="flex-1 flex flex-col lg:flex-row min-h-0 overflow-hidden relative">

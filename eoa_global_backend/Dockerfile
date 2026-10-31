@@ -28,12 +28,12 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Copy application source code
 COPY . /app/eoa_global_backend
 
-# Expose FastAPI default port
+# Expose FastAPI port on 8000
 EXPOSE 8000
 
 # Health check to ensure service readiness
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Start Uvicorn ASGI server
+# Start Uvicorn ASGI server on port 8000
 CMD ["uvicorn", "eoa_global_backend.main:app", "--host", "0.0.0.0", "--port", "8000"]

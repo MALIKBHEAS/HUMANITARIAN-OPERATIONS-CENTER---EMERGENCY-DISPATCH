@@ -2,60 +2,30 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "EOA Global - Operational Coverage Single Source of Truth",
   "version": "1.0.0",
-  "last_updated": "2026-10-29T11:00:00Z",
-  "description": "Canonical operational boundaries for tile server, PostGIS OSINT ingestion, Valhalla routing graphs, and API boundary guard enforcement.",
-  "active_region": {
-    "region_id": "levant-operational-core",
-    "display_name": "Levant Operational Core (Palestine / Levant Extract)",
-    "description": "Active bounds currently packaged inside basemap.pmtiles. Pending user confirmation on multi-country merge.",
-    "bbox": {
-      "min_lon": 34.150000,
-      "min_lat": 31.150000,
-      "max_lon": 35.650000,
-      "max_lat": 33.350000
-    },
-    "envelope_geojson": {
-      "type": "Polygon",
-      "coordinates": [
-        [
-          [34.150000, 31.150000],
-          [35.650000, 31.150000],
-          [35.650000, 33.350000],
-          [34.150000, 33.350000],
-          [34.150000, 31.150000]
-        ]
-      ]
-    },
-    "packaged_pmtiles_archive": "eoa_global_frontend/public/tiles/basemap.pmtiles"
+  "region_id": "israel-and-palestine",
+  "display_name": "Palestine and Israel Sovereign Operational Area",
+  "source_pbf": "data/osm/israel-and-palestine-latest.osm.pbf",
+  "replication_base_url": "https://download.geofabrik.de/asia/israel-and-palestine-updates",
+  "replication_sequence_number": 4932,
+  "osmosis_replication_timestamp": "2026-10-28T21:21:02Z",
+  "last_updated": "2026-10-29T11:15:43Z",
+  "bbox": {
+    "min_lon": 33.999936,
+    "min_lat": 29.439598,
+    "max_lon": 35.915310,
+    "max_lat": 33.454362
   },
-  "candidate_regions": {
-    "israel_palestine_full": {
-      "display_name": "Palestine & Israel Full Territory",
-      "source_pbf": "israel-and-palestine-latest.osm.pbf",
-      "bbox": {
-        "min_lon": 34.16,
-        "min_lat": 29.45,
-        "max_lon": 35.90,
-        "max_lat": 33.35
-      },
-      "coverage_delta": "Adds southern Negev, Beersheba, and Eilat (lat 29.45 to 31.15) to active bounds."
-    },
-    "greater_levant_merged": {
-      "display_name": "Greater Levant (Palestine, Israel, Lebanon, Jordan)",
-      "sources": [
-        "israel-and-palestine-latest.osm.pbf",
-        "lebanon-latest.osm.pbf",
-        "jordan-latest.osm.pbf"
-      ],
-      "osmium_merge_required": true,
-      "bbox": {
-        "min_lon": 34.16,
-        "min_lat": 29.18,
-        "max_lon": 39.31,
-        "max_lat": 34.70
-      },
-      "coverage_delta": "Full multi-country coverage across Palestine, Israel, Lebanon, and Jordan."
-    }
+  "envelope_geojson": {
+    "type": "Polygon",
+    "coordinates": [
+      [
+        [33.999936, 29.439598],
+        [35.915310, 29.439598],
+        [35.915310, 33.454362],
+        [33.999936, 33.454362],
+        [33.999936, 29.439598]
+      ]
+    ]
   },
   "enforcement": {
     "api_boundary_guard": {
@@ -68,8 +38,8 @@
     },
     "frontend_guard": {
       "show_toast_warning": true,
-      "toast_message_ar": "تنبيه: الإحداثيات تقع خارج نطاق التغطية التشغيلية عالية الدقة للمنظومة",
-      "toast_message_en": "Notice: Incident falls outside high-detail operational coverage area."
+      "toast_message_ar": "تنبيه: الإحداثيات تقع خارج نطاق التغطية التشغيلية للمنظومة",
+      "toast_message_en": "Notice: Coordinates fall outside operational coverage boundaries."
     }
   }
 }

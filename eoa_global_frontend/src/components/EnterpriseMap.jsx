@@ -5,6 +5,7 @@ import {
   Marker,
   Popup,
   Polyline,
+  Polygon,
   CircleMarker,
   LayersControl,
   useMap,
@@ -13,7 +14,7 @@ import {
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import 'leaflet-routing-machine/dist/leaflet-routing-machine.css'
-import { Crosshair } from 'lucide-react'
+import { Crosshair, Video } from 'lucide-react'
 import { TACTICAL_WAYPOINTS } from '../hooks/useLiveFeed'
 
 // Guarantee Leaflet global is available for plugins
@@ -307,16 +308,73 @@ const createAcquiredTargetMarker = () => {
   })
 }
 
-// Map Event Listener for Dynamic Click Targeting
-const TargetingMapEvents = ({ isTargetingMode, onLocationAcquired }) => {
+// Map Event Listener for Dynamic Click Targeting and CCTV Placement
+const TargetingMapEvents = ({
+  isTargetingMode,
+  onLocationAcquired,
+  isCctvPlacementMode,
+  onCctvPlaced,
+}) => {
   useMapEvents({
     click(e) {
-      if (isTargetingMode && onLocationAcquired) {
+      if (isCctvPlacementMode && onCctvPlaced) {
+        onCctvPlaced({ lat: e.latlng.lat, lng: e.latlng.lng })
+      } else if (isTargetingMode && onLocationAcquired) {
         onLocationAcquired({ lat: e.latlng.lat, lng: e.latlng.lng })
       }
     },
   })
   return null
+}
+
+// Tactical CCTV Camera DivIcon with Direction Needle
+const createCctvCameraIcon = (azimuth = 0, mode = 'DAY') => {
+  const accentColor = mode === 'IR' ? '#10b981' : mode === 'FLIR' ? '#f97316' : '#06b6d4'
+  return L.divIcon({
+    className: 'custom-pin-cctv-camera',
+    html: `
+      <div style="position: relative; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; cursor: pointer;">
+        <div style="position: absolute; inset: 0; border-radius: 9999px; border: 2px solid ${accentColor}; background: rgba(10, 14, 23, 0.9); box-shadow: 0 0 16px ${accentColor}90;"></div>
+        <div style="position: absolute; width: 100%; height: 100%; transform: rotate(${azimuth}deg); pointer-events: none; transition: transform 0.15s ease-out;">
+          <div style="position: absolute; top: -6px; left: 50%; transform: translateX(-50%); width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-bottom: 10px solid ${accentColor};"></div>
+        </div>
+        <div style="position: relative; z-index: 10; font-size: 15px; display: flex; align-items: center; justify-content: center;">
+          📹
+        </div>
+      </div>
+    `,
+    iconSize: [44, 44],
+    iconAnchor: [22, 22],
+  })
+}
+
+// Calculates FOV cone coordinates
+const calculateFovConePolygon = (lat, lng, azimuthDeg, fovDeg = 60, zoomMultiplier = 1, numPoints = 24) => {
+  if (!lat || !lng) return null
+  const earthRadius = 6371000
+  const baseRangeMeters = 500
+  const rangeMeters = baseRangeMeters * (zoomMultiplier || 1)
+  const halfFov = (fovDeg || 60) / 2
+  const startAngle = azimuthDeg - halfFov
+  const endAngle = azimuthDeg + halfFov
+
+  const points = [[lat, lng]]
+
+  for (let i = 0; i <= numPoints; i++) {
+    const angle = startAngle + (i / numPoints) * (endAngle - startAngle)
+    const rad = (angle * Math.PI) / 180
+
+    const dLat = (rangeMeters * Math.cos(rad)) / earthRadius
+    const dLng = (rangeMeters * Math.sin(rad)) / (earthRadius * Math.cos((lat * Math.PI) / 180))
+
+    const ptLat = lat + (dLat * 180) / Math.PI
+    const ptLng = lng + (dLng * 180) / Math.PI
+
+    points.push([ptLat, ptLng])
+  }
+
+  points.push([lat, lng])
+  return points
 }
 
 // =============================================================================
@@ -552,6 +610,10 @@ export const EnterpriseMap = ({
   isTargetingMode = false,
   onLocationAcquired,
   acquiredCoords = null,
+  cctvConfig = null,
+  isCctvPlacementMode = false,
+  onCctvPlaced = null,
+  onCancelCctvPlacement = null,
   children,
 }) => {
 
@@ -644,8 +706,61 @@ export const EnterpriseMap = ({
     [onRoutingResolved]
   )
 
+  // Dynamic Map CSS Filter (The Master Illusion)
+  const mapFilterStyle = useMemo(() => {
+    if (!cctvConfig?.active) return 'none'
+    if (cctvConfig.mode === 'IR') {
+      return 'grayscale(100%) sepia(100%) hue-rotate(85deg) brightness(1.2) contrast(1.5)'
+    }
+    if (cctvConfig.mode === 'FLIR') {
+      return 'grayscale(100%) invert(100%) hue-rotate(180deg) brightness(1.3) contrast(2)'
+    }
+    return 'none'
+  }, [cctvConfig?.active, cctvConfig?.mode])
+
+  // Dynamic FOV Cone Polygon
+  const fovConePolygon = useMemo(() => {
+    if (!cctvConfig?.active || !cctvConfig?.lat || !cctvConfig?.lng) return null
+    return calculateFovConePolygon(
+      cctvConfig.lat,
+      cctvConfig.lng,
+      cctvConfig.azimuth || 0,
+      cctvConfig.fov || 60,
+      cctvConfig.zoom || 1
+    )
+  }, [cctvConfig?.active, cctvConfig?.lat, cctvConfig?.lng, cctvConfig?.azimuth, cctvConfig?.fov, cctvConfig?.zoom])
+
+  const fovConeStyle = useMemo(() => {
+    const mode = cctvConfig?.mode || 'DAY'
+    if (mode === 'IR') {
+      return {
+        color: '#10b981',
+        fillColor: '#10b981',
+        fillOpacity: 0.3,
+        dashArray: '6, 6',
+        weight: 2,
+      }
+    }
+    if (mode === 'FLIR') {
+      return {
+        color: '#f97316',
+        fillColor: '#ef4444',
+        fillOpacity: 0.35,
+        dashArray: '6, 6',
+        weight: 2,
+      }
+    }
+    return {
+      color: '#06b6d4',
+      fillColor: '#06b6d4',
+      fillOpacity: 0.25,
+      dashArray: '6, 6',
+      weight: 2,
+    }
+  }, [cctvConfig?.mode])
+
   return (
-    <div className={`relative w-full h-full bg-[#0a0d13] overflow-hidden select-none ${isTargetingMode ? 'cursor-crosshair' : ''}`}>
+    <div className={`relative w-full h-full bg-[#0a0d13] overflow-hidden select-none ${isTargetingMode || isCctvPlacementMode ? 'cursor-crosshair' : ''}`}>
       {/* C4ISR Map Viewport Header Indicator (Strict Non-Overlapping Border) */}
       <div className="absolute top-1 left-2 z-[450] flex items-center gap-2 pointer-events-none font-mono">
         <span className="flex h-2 w-2 relative">
@@ -665,16 +780,47 @@ export const EnterpriseMap = ({
         </div>
       )}
 
+      {/* CCTV Placement Mode Active Banner Indicator */}
+      {isCctvPlacementMode && (
+        <div className="absolute top-2 left-1/2 -translate-x-1/2 z-[460] px-4 py-2 bg-cyan-950/95 border-2 border-cyan-400 rounded-lg text-cyan-300 font-mono text-xs font-bold uppercase tracking-wider flex items-center gap-2.5 shadow-[0_0_25px_rgba(6,182,212,0.8)] animate-pulse">
+          <Video className="w-4 h-4 text-cyan-300 animate-spin" />
+          <span>CCTV PLACEMENT MODE: CLICK MAP TO DEPLOY SENSOR</span>
+          {onCancelCctvPlacement && (
+            <button
+              type="button"
+              onClick={onCancelCctvPlacement}
+              className="ml-2 px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-600 text-[10px] cursor-pointer"
+            >
+              CANCEL
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Scanline HUD overlay when CCTV Sensor is active */}
+      {cctvConfig?.active && (
+        <div className="absolute inset-0 pointer-events-none z-[400] bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.2)_50%)] bg-[length:100%_4px] opacity-25" />
+      )}
+
       {/* Primary Leaflet Container with Topographical & Tactical Light Basemaps */}
       <MapContainer
         center={targetCoordinates}
         zoom={13}
         scrollWheelZoom={true}
         attributionControl={false}
-        className={`w-full h-full z-0 bg-[#0c1017] ${isTargetingMode ? 'cursor-crosshair' : ''}`}
+        className={`w-full h-full z-0 bg-[#0c1017] ${isTargetingMode || isCctvPlacementMode ? 'cursor-crosshair' : ''}`}
+        style={{
+          filter: mapFilterStyle,
+          transition: 'filter 0.35s ease-in-out',
+        }}
       >
         <MapCameraController targetCoordinates={targetCoordinates} />
-        <TargetingMapEvents isTargetingMode={isTargetingMode} onLocationAcquired={onLocationAcquired} />
+        <TargetingMapEvents
+          isTargetingMode={isTargetingMode}
+          onLocationAcquired={onLocationAcquired}
+          isCctvPlacementMode={isCctvPlacementMode}
+          onCctvPlaced={onCctvPlaced}
+        />
 
         {/* Tactical Coordinate Graticule Overlay */}
         <MilitaryGraticuleOverlay />
@@ -850,6 +996,37 @@ export const EnterpriseMap = ({
             </Popup>
           </Marker>
         )}
+        {/* ============================================================= */}
+        {/* GEOSPATIAL CCTV SENSOR: FOV Cone & Tactical Camera Marker     */}
+        {/* ============================================================= */}
+        {cctvConfig?.active && fovConePolygon && (
+          <Polygon positions={fovConePolygon} pathOptions={fovConeStyle} />
+        )}
+
+        {cctvConfig?.active && cctvConfig.lat && cctvConfig.lng && (
+          <Marker
+            position={[cctvConfig.lat, cctvConfig.lng]}
+            icon={createCctvCameraIcon(cctvConfig.azimuth || 0, cctvConfig.mode || 'DAY')}
+          >
+            <Popup>
+              <div className="p-2 font-mono text-xs bg-slate-950 text-white rounded border border-cyan-500 min-w-[190px]">
+                <div className="flex items-center justify-between border-b border-slate-700 pb-1 mb-1 font-bold text-cyan-400">
+                  <div className="flex items-center gap-1.5">
+                    <Video className="w-3.5 h-3.5" />
+                    <span>CCTV SENSOR</span>
+                  </div>
+                  <span className="text-[10px] text-slate-300 uppercase">[{cctvConfig.mode}]</span>
+                </div>
+                <div className="space-y-1 text-slate-300 text-[11px]">
+                  <div>GRID: <span className="text-yellow-300 font-bold">{Number(cctvConfig.lat).toFixed(5)}°N, {Number(cctvConfig.lng).toFixed(5)}°E</span></div>
+                  <div>AZIMUTH: <span className="text-cyan-300 font-bold">{cctvConfig.azimuth}°</span></div>
+                  <div>ZOOM / RANGE: <span className="text-emerald-400 font-bold">{cctvConfig.zoom}X ({cctvConfig.zoom * 500}m)</span></div>
+                </div>
+              </div>
+            </Popup>
+          </Marker>
+        )}
+
         {/* Isolated Overlays / Camera Layers */}
         {children}
       </MapContainer>

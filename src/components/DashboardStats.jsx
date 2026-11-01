@@ -1,5 +1,5 @@
 import React from 'react';
-import { Shield, AlertTriangle, Activity, LogOut, Siren, Wifi, HeartPulse, CheckCircle2 } from 'lucide-react';
+import { Shield, AlertTriangle, Activity, LogOut, Siren, Wifi, HeartPulse, CheckCircle2, Video } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 export default function DashboardStats({
@@ -7,6 +7,8 @@ export default function DashboardStats({
   wsStatus = 'DISCONNECTED',
   systemHealth = null,
   onTriggerSOS,
+  cctvConfig = null,
+  onTriggerCCTVPlacement = null,
 }) {
   const { user, logout } = useAuth();
 
@@ -118,6 +120,23 @@ export default function DashboardStats({
             <span>SYNC:</span>
             <span className="text-slate-200">{lastSync}</span>
           </div>
+        )}
+
+        {/* CCTV Geospatial Sensor Trigger */}
+        {onTriggerCCTVPlacement && (
+          <button
+            type="button"
+            onClick={onTriggerCCTVPlacement}
+            title="Deploy or Relocate Geospatial CCTV Sensor on Map"
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-mono font-bold transition-all cursor-pointer min-h-[38px] ${
+              cctvConfig?.active
+                ? 'bg-cyan-950/80 border-cyan-400 text-cyan-300 shadow-md shadow-cyan-950/80'
+                : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-200 hover:border-cyan-400'
+            }`}
+          >
+            <Video className="w-3.5 h-3.5 text-cyan-400" />
+            <span>{cctvConfig?.active ? 'CCTV [LIVE]' : 'CCTV CONTROL CENTER'}</span>
+          </button>
         )}
 
         {/* Immediate SOS / Emergency Button */}

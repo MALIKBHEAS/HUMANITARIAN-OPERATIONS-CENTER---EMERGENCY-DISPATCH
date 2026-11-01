@@ -5,6 +5,7 @@ import { useSystemHealth } from '../hooks/useSystemHealth'
 import { EnterpriseMap } from '../components/EnterpriseMap'
 import { CameraCoverageOverlay } from '../components/CameraCoverageOverlay'
 import { CCTVControlCenter, DEFAULT_CAMERAS } from '../components/CCTVControlCenter'
+import { CCTVPanel } from '../components/CCTVPanel'
 import { AIIncidentFeed } from '../components/AIIncidentFeed'
 import { TacticalConfirmModal } from '../components/TacticalConfirmModal'
 import { apiClient } from '../services/api'
@@ -128,11 +129,41 @@ export const Dashboard = () => {
     return () => clearInterval(interval)
   }, [])
 
-  // Modals & Unified CCTV Control Center state
+  // 1. STATE MANAGEMENT: CCTV GEOSPATIAL SENSOR & PLACEMENT MODE
+  const [cctvConfig, setCctvConfig] = useState({
+    active: false,
+    lat: null,
+    lng: null,
+    azimuth: 0,
+    fov: 60,
+    zoom: 1,
+    mode: 'DAY',
+  })
+  const [isCctvPlacementMode, setIsCctvPlacementMode] = useState(false)
+
+  // Modals & Legacy CCTV Control Center state
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false)
   const [isCCTVControlCenterOpen, setIsCCTVControlCenterOpen] = useState(false)
   const [cameras, setCameras] = useState(DEFAULT_CAMERAS)
   const [activeCameraId, setActiveCameraId] = useState(DEFAULT_CAMERAS[0].id)
+
+  // Workflow: CCTV Placement Mode Activation
+  const handleActivateCctvPlacement = () => {
+    setIsCctvPlacementMode(true)
+    triggerToast('CCTV PLACEMENT MODE ACTIVE: CLICK MAP TO DEPLOY SENSOR')
+  }
+
+  // Workflow: Map Click in CCTV Placement Mode
+  const handleCctvPlaced = (coords) => {
+    setCctvConfig((prev) => ({
+      ...prev,
+      lat: coords.lat,
+      lng: coords.lng,
+      active: true,
+    }))
+    setIsCctvPlacementMode(false)
+    triggerToast('GEOSPATIAL SENSOR DEPLOYED: MAP FEED ACTIVE')
+  }
 
   // ===========================================================================
   // TARGETING MODE & DYNAMIC COORDINATE CAPTURE STATE
@@ -525,6 +556,10 @@ export const Dashboard = () => {
               isTargetingMode={isTargetingMode}
               onLocationAcquired={handleLocationAcquired}
               acquiredCoords={pendingTargetCoords}
+              cctvConfig={cctvConfig}
+              isCctvPlacementMode={isCctvPlacementMode}
+              onCctvPlaced={handleCctvPlaced}
+              onCancelCctvPlacement={() => setIsCctvPlacementMode(false)}
             >
               {/* Isolated Camera Coverage Overlay (Sector Wedges + Direction Markers) */}
               <CameraCoverageOverlay
@@ -572,15 +607,19 @@ export const Dashboard = () => {
                   <span>SHARE COORDS</span>
                 </button>
 
-                {/* Unified CCTV Control Center (Replaces scattered mode buttons) */}
+                {/* Geospatial CCTV Sensor Placement & Control Trigger */}
                 <button
                   type="button"
-                  onClick={() => setIsCCTVControlCenterOpen(true)}
-                  className="flex items-center gap-2 px-3.5 py-1.5 rounded-md bg-cyan-700 hover:bg-cyan-600 text-white font-bold text-xs uppercase border border-cyan-400 shadow-md transition-all cursor-pointer min-h-[34px]"
-                  title="Open Unified CCTV Reconnaissance & Coverage Control Center"
+                  onClick={handleActivateCctvPlacement}
+                  className={`flex items-center gap-2 px-3.5 py-1.5 rounded-md border text-xs font-bold transition-all cursor-pointer min-h-[34px] ${
+                    cctvConfig.active
+                      ? 'bg-cyan-950/80 border-cyan-400 text-cyan-300 shadow-md shadow-cyan-950 animate-pulse'
+                      : 'bg-cyan-700 hover:bg-cyan-600 border-cyan-400 text-white shadow-md'
+                  }`}
+                  title="Deploy or Relocate Geospatial CCTV Sensor on Map"
                 >
                   <Video className="w-4 h-4 text-cyan-200" />
-                  <span>CCTV CONTROL CENTER</span>
+                  <span>{cctvConfig.active ? 'CCTV SENSOR [LIVE]' : 'CCTV CONTROL CENTER'}</span>
                 </button>
               </div>
             </div>
@@ -691,7 +730,15 @@ export const Dashboard = () => {
         </div>
       )}
 
-      {/* Unified CCTV Reconnaissance & Coverage Control Center */}
+      {/* 2. Tactical Geospatial Sensor Control Widget (CCTVPanel.jsx) */}
+      <CCTVPanel
+        cctvConfig={cctvConfig}
+        onChangeConfig={setCctvConfig}
+        onClose={() => setCctvConfig((prev) => ({ ...prev, active: false }))}
+        onRelocate={handleActivateCctvPlacement}
+      />
+
+      {/* Legacy / Multi-Camera Control Center Modal (if invoked) */}
       <CCTVControlCenter
         isOpen={isCCTVControlCenterOpen}
         onClose={() => setIsCCTVControlCenterOpen(false)}

@@ -3,10 +3,11 @@ import DashboardStats from './DashboardStats';
 import LiveMap from './LiveMap';
 import IncidentFeed from './IncidentFeed';
 import TacticalConfirmModal from './TacticalConfirmModal';
+import CCTVPanel from './CCTVPanel';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useSystemHealth } from '../hooks/useSystemHealth';
 import { API_BASE_URL, api } from '../api';
-import { Send, X, AlertCircle, Sparkles, CheckCircle2, Crosshair, LocateFixed, Check } from 'lucide-react';
+import { Send, X, AlertCircle, Sparkles, CheckCircle2, Crosshair, LocateFixed, Check, Video } from 'lucide-react';
 
 const PRESET_SCENARIOS = [
   {
@@ -76,6 +77,20 @@ export default function DashboardLayout() {
   const [toastMessage, setToastMessage] = useState(null);
 
   // ===========================================================================
+  // 1. STATE MANAGEMENT: CCTV GEOSPATIAL SENSOR & PLACEMENT MODE
+  // ===========================================================================
+  const [cctvConfig, setCctvConfig] = useState({
+    active: false,
+    lat: null,
+    lng: null,
+    azimuth: 0,
+    fov: 60,
+    zoom: 1,
+    mode: 'DAY',
+  });
+  const [isCctvPlacementMode, setIsCctvPlacementMode] = useState(false);
+
+  // ===========================================================================
   // TARGETING MODE & DYNAMIC COORDINATE DISPATCH
   // ===========================================================================
   const [isTargetingMode, setIsTargetingMode] = useState(false);
@@ -92,6 +107,24 @@ export default function DashboardLayout() {
 
   const handleApplyPreset = (scenario) => {
     setSimForm(scenario);
+  };
+
+  // Workflow: CCTV Placement Mode Activation
+  const handleActivateCctvPlacement = () => {
+    setIsCctvPlacementMode(true);
+    triggerToast('CCTV PLACEMENT MODE ACTIVE: CLICK MAP TO DEPLOY SENSOR');
+  };
+
+  // Workflow: Map Click in CCTV Placement Mode
+  const handleCctvPlaced = (coords) => {
+    setCctvConfig((prev) => ({
+      ...prev,
+      lat: coords.lat,
+      lng: coords.lng,
+      active: true,
+    }));
+    setIsCctvPlacementMode(false);
+    triggerToast('GEOSPATIAL SENSOR DEPLOYED: MAP FEED ACTIVE');
   };
 
   // Workflow: Start Targeting Mode on SOS Click
@@ -215,6 +248,8 @@ export default function DashboardLayout() {
         wsStatus={status}
         systemHealth={systemHealth}
         onTriggerSOS={handleTriggerSOS}
+        cctvConfig={cctvConfig}
+        onTriggerCCTVPlacement={handleActivateCctvPlacement}
       />
 
       {/* Target Acquisition Mode Active HUD Banner */}
@@ -262,7 +297,7 @@ export default function DashboardLayout() {
       {/* Main Operational Split View */}
       <div className="flex-1 flex flex-col lg:flex-row min-h-0 overflow-hidden relative">
         
-        {/* Left / Top: Interactive LiveMap */}
+        {/* Left / Top: Interactive LiveMap with CCTV Sensor & Dynamic Map Filters */}
         <div className="flex-1 relative min-h-[350px] lg:h-full overflow-hidden">
           <LiveMap
             incidents={incidentHistory}
@@ -270,6 +305,10 @@ export default function DashboardLayout() {
             isTargetingMode={isTargetingMode}
             onLocationAcquired={handleLocationAcquired}
             acquiredCoords={pendingTargetCoords}
+            cctvConfig={cctvConfig}
+            isCctvPlacementMode={isCctvPlacementMode}
+            onCctvPlaced={handleCctvPlaced}
+            onCancelCctvPlacement={() => setIsCctvPlacementMode(false)}
           />
 
           {/* Floating Dispatch Test Trigger -> Enters Targeting Mode */}
@@ -291,6 +330,14 @@ export default function DashboardLayout() {
         </div>
 
       </div>
+
+      {/* 2. THE TACTICAL CONTROL WIDGET (CCTVPanel.jsx) */}
+      <CCTVPanel
+        cctvConfig={cctvConfig}
+        onChangeConfig={setCctvConfig}
+        onClose={() => setCctvConfig((prev) => ({ ...prev, active: false }))}
+        onRelocate={handleActivateCctvPlacement}
+      />
 
       {/* Custom Tactical Confirmation Modal (No Native Alerts) */}
       <TacticalConfirmModal
@@ -360,74 +407,100 @@ export default function DashboardLayout() {
               </div>
             </div>
 
+            {/* Form Fields */}
             <form onSubmit={handleTriggerWebhook} className="space-y-3 font-mono text-xs">
-              <div>
-                <label className="block text-slate-400 mb-1 text-[11px]">SCENARIO LABEL</label>
-                <input
-                  type="text"
-                  value={simForm.label}
-                  onChange={(e) => setSimForm({ ...simForm, label: e.target.value })}
-                  className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-white focus:outline-none focus:border-red-500"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-400 mb-1 text-[11px]">LATITUDE</label>
-                  <input
-                    type="number"
-                    step="any"
-                    value={simForm.lat}
-                    onChange={(e) => setSimForm({ ...simForm, lat: parseFloat(e.target.value) })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-white focus:outline-none focus:border-red-500"
-                  />
+                  <label className="text-slate-400 text-[10px] block mb-1">INCIDENT TYPE</label>
+                  <select
+                    value={simForm.type}
+                    onChange={(e) => setSimForm({ ...simForm, type: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white"
+                  >
+                    <option value="FIRE">FIRE (Multi-floor)</option>
+                    <option value="CRASH">CRASH (Mass transit)</option>
+                    <option value="CRIME">CRIME (Armed threat)</option>
+                  </select>
                 </div>
                 <div>
-                  <label className="block text-slate-400 mb-1 text-[11px]">LONGITUDE</label>
+                  <label className="text-slate-400 text-[10px] block mb-1">SEVERITY LEVEL (1-5)</label>
                   <input
                     type="number"
-                    step="any"
-                    value={simForm.lon}
-                    onChange={(e) => setSimForm({ ...simForm, lon: parseFloat(e.target.value) })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-white focus:outline-none focus:border-red-500"
+                    min="1"
+                    max="5"
+                    value={simForm.severity_level}
+                    onChange={(e) => setSimForm({ ...simForm, severity_level: parseInt(e.target.value) })}
+                    className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-slate-400 mb-1 text-[11px]">INCIDENT SUMMARY</label>
+                <label className="text-slate-400 text-[10px] block mb-1">INCIDENT DESCRIPTION</label>
                 <textarea
-                  rows={3}
+                  rows="2"
                   value={simForm.description}
                   onChange={(e) => setSimForm({ ...simForm, description: e.target.value })}
-                  className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-white focus:outline-none focus:border-red-500"
+                  className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white"
                 />
               </div>
 
-              <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="text-slate-400 text-[10px] block mb-1">LATITUDE</label>
+                  <input
+                    type="number"
+                    step="0.0001"
+                    value={simForm.lat}
+                    onChange={(e) => setSimForm({ ...simForm, lat: parseFloat(e.target.value) })}
+                    className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white"
+                  />
+                </div>
+                <div>
+                  <label className="text-slate-400 text-[10px] block mb-1">LONGITUDE</label>
+                  <input
+                    type="number"
+                    step="0.0001"
+                    value={simForm.lon}
+                    onChange={(e) => setSimForm({ ...simForm, lon: parseFloat(e.target.value) })}
+                    className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white"
+                  />
+                </div>
+                <div>
+                  <label className="text-slate-400 text-[10px] block mb-1">BEDS NEEDED</label>
+                  <input
+                    type="number"
+                    value={simForm.required_beds}
+                    onChange={(e) => setSimForm({ ...simForm, required_beds: parseInt(e.target.value) })}
+                    className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setIsSimulatorOpen(false)}
-                  className="px-3 py-1.5 rounded bg-slate-800 text-slate-300 font-bold hover:bg-slate-700"
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded text-slate-300 font-bold"
                 >
                   CANCEL
                 </button>
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="flex items-center gap-1.5 px-4 py-1.5 rounded bg-red-600 hover:bg-red-500 text-white font-bold disabled:opacity-50"
+                  className="px-5 py-2 bg-red-600 hover:bg-red-500 text-white rounded font-bold flex items-center gap-1.5 shadow-lg shadow-red-950"
                 >
                   {isSubmitting ? (
-                    <span>TRANSMITTING...</span>
+                    'DISPATCHING...'
                   ) : submitSuccess ? (
                     <>
-                      <CheckCircle2 className="w-4 h-4 text-white" />
-                      <span>DISPATCHED!</span>
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                      DISPATCHED!
                     </>
                   ) : (
                     <>
                       <Send className="w-4 h-4" />
-                      <span>INJECT PAYLOAD</span>
+                      SUBMIT EMERGENCY
                     </>
                   )}
                 </button>

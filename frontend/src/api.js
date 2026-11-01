@@ -19,18 +19,34 @@ export async function apiRequest(endpoint, options = {}) {
     ...(options.headers || {}),
   };
 
-  const response = await fetch(url, {
-    ...options,
-    headers,
-  });
+  try {
+    const response = await fetch(url, {
+      ...options,
+      headers,
+    });
 
-  if (!response.ok) {
-    const errorBody = await response.json().catch(() => ({}));
-    const message = errorBody.detail || errorBody.message || response.statusText;
-    throw new Error(`API Error [${response.status}]: ${message}`);
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => ({}));
+      const message = errorBody.detail || errorBody.message || response.statusText;
+      throw new Error(`API Error [${response.status}]: ${message}`);
+    }
+
+    return await response.json();
+  } catch (err) {
+    if (!endpoint.startsWith('http')) {
+      try {
+        const fallbackUrl = `/api${cleanEndpoint}`;
+        const fallbackRes = await fetch(fallbackUrl, {
+          ...options,
+          headers,
+        });
+        if (fallbackRes.ok) {
+          return await fallbackRes.json();
+        }
+      } catch (_) {}
+    }
+    throw err;
   }
-
-  return response.json();
 }
 
 /**

@@ -33,23 +33,28 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# 2. Configure CORS Middleware (Allows all origins for MVP / whitelists 49152 & 8000)
+# 2. Configure CORS Middleware (Explicitly whitelists 49152, 9443, 8000, 5173)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:49152",
         "http://127.0.0.1:49152",
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
+        "http://localhost:9443",
+        "http://127.0.0.1:9443",
         "http://localhost:8000",
         "http://127.0.0.1:8000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
         "http://localhost:80",
         "http://127.0.0.1:80",
-        "*",
+        "http://localhost",
+        "http://127.0.0.1",
     ],
-    allow_credentials=False,
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:[0-9]+)?$",
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 # 3. Include Routers strictly with prefix="/api"

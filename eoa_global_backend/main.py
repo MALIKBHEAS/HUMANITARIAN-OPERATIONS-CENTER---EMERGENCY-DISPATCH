@@ -74,21 +74,25 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Configure Cross-Origin Resource Sharing (CORS) - Allows all origins for MVP / whitelists 49152 & 8000
+# Configure Cross-Origin Resource Sharing (CORS) - Explicitly whitelists 49152, 9443, 8000, 5173
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:49152",
         "http://127.0.0.1:49152",
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
+        "http://localhost:9443",
+        "http://127.0.0.1:9443",
         "http://localhost:8000",
         "http://127.0.0.1:8000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
         "http://localhost:80",
         "http://127.0.0.1:80",
-        "*",
+        "http://localhost",
+        "http://127.0.0.1",
     ],
-    allow_credentials=False,
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:[0-9]+)?$",
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["*"],
@@ -102,17 +106,32 @@ app.include_router(websocket_router)  # Mounted at root: /ws/live-feed/{tenant_i
 
 @app.post("/api/webhook/incident", tags=["Incidents Webhook"])
 @app.post("/webhook/incident", tags=["Incidents Webhook"])
+@app.post("/api/incidents", tags=["Incidents Webhook"])
+@app.post("/api/v1/webhook/incident", tags=["Incidents Webhook"])
+@app.post("/api/v1/sos/trigger-public", tags=["Incidents Webhook"])
 async def receive_incident_webhook(payload: dict):
-    from eoa_global_backend.api.websocket import manager
+    from eoa_global_backend.api.websocket import ws_manager, manager
     import time
+
+    incident_type = payload.get("type") or payload.get("incident_type") or "CRASH"
+    raw_sev = payload.get("severity_level") or payload.get("severity") or 4
+    if isinstance(raw_sev, str):
+        sev_map = {"LOW": 1, "MEDIUM": 2, "HIGH": 4, "CRITICAL": 5}
+        severity_level = sev_map.get(raw_sev.upper(), 4)
+    else:
+        severity_level = int(raw_sev)
+
+    lat = float(payload.get("lat") or payload.get("latitude") or 31.5273)
+    lon = float(payload.get("lon") or payload.get("lng") or payload.get("longitude") or 35.0946)
+
     dispatch_msg = {
         "status": "DISPATCHED",
         "incident_id": payload.get("id") or f"INC-{int(time.time())}",
-        "incident_type": payload.get("type", "CRASH"),
-        "severity_level": payload.get("severity_level", 4),
-        "incident_summary": payload.get("description", "Emergency incident reported."),
-        "lat": payload.get("lat", 31.5273),
-        "lon": payload.get("lon", 35.0946),
+        "incident_type": incident_type,
+        "severity_level": severity_level,
+        "incident_summary": payload.get("description") or "Emergency incident reported.",
+        "lat": lat,
+        "lon": lon,
         "dispatches": [
             {"agency_type": "Hospital", "units": 2, "target": "Al-Ahli Hospital", "eta_minutes": 3.5},
             {"agency_type": "Police", "units": 1, "target": "Hebron Central Police Directorate", "eta_minutes": 4.0}
@@ -123,7 +142,16 @@ async def receive_incident_webhook(payload: dict):
         },
         "response_time_eta_max_minutes": 4.0
     }
-    await manager.broadcast_to_tenant("default", dispatch_msg)
+
+    # Broadcast to all connected clients across all tenant groups
+    try:
+        await ws_manager.broadcast_to_tenant("default", dispatch_msg)
+        await ws_manager.broadcast_to_tenant("eoa-global-hq", dispatch_msg)
+        if hasattr(ws_manager, "broadcast"):
+            await ws_manager.broadcast(dispatch_msg)
+    except Exception as exc:
+        print(f"[WebSocket Broadcast Notification] {exc}")
+
     return dispatch_msg
 
 @app.get("/api/resources/all", tags=["Emergency Resources"])

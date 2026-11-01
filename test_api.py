@@ -11,42 +11,42 @@ def setup_test_environment():
     seed()
 
 def test_health_check():
-    client = TestClient(app)
-    response = client.get("/")
-    assert response.status_code == 200
-    assert response.json()["status"] == "OPERATIONAL"
+    with TestClient(app) as client:
+        response = client.get("/")
+        assert response.status_code == 200
+        assert response.json()["status"] == "OPERATIONAL"
 
 def test_get_resources():
-    client = TestClient(app)
-    h_resp = client.get("/api/resources/hospitals")
-    assert h_resp.status_code == 200
-    assert len(h_resp.json()) > 0
-    assert "icu_beds_available" in h_resp.json()[0]
+    with TestClient(app) as client:
+        h_resp = client.get("/api/resources/hospitals")
+        assert h_resp.status_code == 200
+        assert len(h_resp.json()) > 0
+        assert "icu_beds_available" in h_resp.json()[0]
 
-    p_resp = client.get("/api/resources/police")
-    assert p_resp.status_code == 200
-    assert len(p_resp.json()) > 0
-    assert "patrols_available" in p_resp.json()[0]
+        p_resp = client.get("/api/resources/police")
+        assert p_resp.status_code == 200
+        assert len(p_resp.json()) > 0
+        assert "patrols_available" in p_resp.json()[0]
 
 def test_webhook_incident_dispatch_e2e():
-    client = TestClient(app)
-    payload = {
-        "type": "FIRE",
-        "severity_level": 5,
-        "description": "Chemical plant explosion and high-rise fire in Hebron sector",
-        "lat": 31.5273,
-        "lon": 35.0946,
-        "required_beds": 5,
-        "security_token": "valid_token_123"
-    }
-    
-    response = client.post("/api/webhook/incident", json=payload)
-    assert response.status_code == 200
-    data = response.json()
-    assert data["status"] == "DISPATCHED"
-    assert len(data["dispatches"]) >= 1
-    assert data["units_assigned"]["hospital"] is not None
-    assert data["units_assigned"]["police"] is not None
+    with TestClient(app) as client:
+        payload = {
+            "type": "FIRE",
+            "severity_level": 5,
+            "description": "Chemical plant explosion and high-rise fire in Hebron sector",
+            "lat": 31.5273,
+            "lon": 35.0946,
+            "required_beds": 5,
+            "security_token": "valid_token_123"
+        }
+        
+        response = client.post("/api/webhook/incident", json=payload)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "DISPATCHED"
+        assert len(data["dispatches"]) >= 1
+        assert data["units_assigned"]["hospital"] is not None
+        assert data["units_assigned"]["police"] is not None
 
 def test_websocket_broadcast_integration():
     client = TestClient(app)

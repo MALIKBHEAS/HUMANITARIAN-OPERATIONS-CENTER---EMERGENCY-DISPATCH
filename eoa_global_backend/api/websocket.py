@@ -113,6 +113,20 @@ class ConnectionManager:
                     if clean_tenant in self._active_connections:
                         self._active_connections[clean_tenant].discard(dead_socket)
 
+    async def broadcast(self, message: Dict[str, Any]) -> None:
+        """
+        Broadcasts a message to all connected clients across all tenant partitions.
+        Ensures global alerts and C4ISR emergency dispatches reach every active terminal.
+        """
+        async with self.lock:
+            all_tenants = list(self._active_connections.keys())
+
+        if not all_tenants:
+            return
+
+        for tenant_id in all_tenants:
+            await self.broadcast_to_tenant(tenant_id, message)
+
     async def _tenant_stream_listener(self, tenant_id: str) -> None:
         """
         Background listener task bound to a single tenant channel on the message broker.
@@ -130,6 +144,7 @@ class ConnectionManager:
 
 # Global singleton connection manager
 ws_manager = ConnectionManager()
+manager = ws_manager
 
 
 async def _handle_tenant_ws(

@@ -1,0 +1,17 @@
+{
+  "short_name": "EOA Edge",
+  "name": "EOA Tactical Edge Terminal",
+  "icons": [
+    {
+      "src": "favicon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#05070a",
+  "theme_color": "#05070a",
+  "display": "standalone",
+  "orientation": "portrait"
+}

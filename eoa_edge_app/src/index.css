@@ -1,0 +1,30 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  background-color: #05070a;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Tactical CRT / Scanline background pattern */
+.tactical-grid-bg {
+  background-image: 
+    linear-gradient(rgba(14, 23, 42, 0.4) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(14, 23, 42, 0.4) 1px, transparent 1px);
+  background-size: 24px 24px;
+}

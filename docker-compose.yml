@@ -123,6 +123,22 @@ services:
     networks:
       - eoa_network
 
+  # ---------------------------------------------------------------------------
+  # 6. EOA Tactical Edge Mobile Terminal (Field Operative GPS SOS PWA)
+  # ---------------------------------------------------------------------------
+  edge-app:
+    build:
+      context: ./eoa_edge_app
+      dockerfile: Dockerfile
+    container_name: eoa-edge-app
+    restart: always
+    depends_on:
+      - backend
+    ports:
+      - "5173:5173"
+    networks:
+      - eoa_network
+
 # -----------------------------------------------------------------------------
 # Persistent Volumes & Network Definitions
 # -----------------------------------------------------------------------------

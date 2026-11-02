@@ -86,10 +86,11 @@ class ConnectionManager:
 
         logger.info(f"[WebSocket] Client disconnected from tenant '{clean_tenant}'.")
 
-    async def broadcast_to_tenant(self, tenant_id: str, message: Dict[str, Any]) -> None:
+    async def broadcast_to_tenant(self, tenant_id: str, message: Any) -> None:
         """
         CRITICAL MULTI-TENANT BROADCAST:
         Directly pushes the JSON frame ONLY to clients residing in the matching tenant partition.
+        Supports both dict payloads and pre-serialized JSON strings.
         """
         clean_tenant = tenant_id.strip().lower()
         async with self.lock:
@@ -101,7 +102,10 @@ class ConnectionManager:
         dead_sockets: List[WebSocket] = []
         for socket in sockets:
             try:
-                await socket.send_json(message)
+                if isinstance(message, str):
+                    await socket.send_text(message)
+                else:
+                    await socket.send_json(message)
             except Exception as exc:
                 logger.warning(f"[WebSocket] Failed to send to socket in tenant '{clean_tenant}': {exc}")
                 dead_sockets.append(socket)
@@ -113,10 +117,11 @@ class ConnectionManager:
                     if clean_tenant in self._active_connections:
                         self._active_connections[clean_tenant].discard(dead_socket)
 
-    async def broadcast(self, message: Dict[str, Any]) -> None:
+    async def broadcast(self, message: Any) -> None:
         """
         Broadcasts a message to all connected clients across all tenant partitions.
         Ensures global alerts and C4ISR emergency dispatches reach every active terminal.
+        Supports both dict payloads and pre-serialized JSON strings.
         """
         async with self.lock:
             all_tenants = list(self._active_connections.keys())

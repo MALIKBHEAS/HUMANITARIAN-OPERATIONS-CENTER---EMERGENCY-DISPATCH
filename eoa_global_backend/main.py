@@ -112,6 +112,8 @@ app.include_router(websocket_router)  # Mounted at root: /ws/live-feed/{tenant_i
 async def receive_incident_webhook(payload: dict):
     from eoa_global_backend.api.websocket import ws_manager, manager
     import time
+    import json
+    from datetime import datetime, timezone
 
     incident_type = payload.get("type") or payload.get("incident_type") or "CRASH"
     raw_sev = payload.get("severity_level") or payload.get("severity") or 4
@@ -123,34 +125,98 @@ async def receive_incident_webhook(payload: dict):
 
     lat = float(payload.get("lat") or payload.get("latitude") or 31.5273)
     lon = float(payload.get("lon") or payload.get("lng") or payload.get("longitude") or 35.0946)
+    incident_id = payload.get("id") or payload.get("incident_id") or f"INC-{int(time.time())}"
+    description = payload.get("description") or payload.get("incident_summary") or "Emergency incident reported."
 
+    # 1. Persist incident to database if session is available
+    try:
+        from eoa_global_backend.db.database import AsyncSessionLocal
+        from eoa_global_backend.db.models import Incident
+        async with AsyncSessionLocal() as session:
+            db_incident = Incident(
+                id=incident_id,
+                tenant_id="default",
+                title=f"SOS Incident {incident_id}",
+                incident_type=incident_type,
+                severity=severity_level,
+                description=description,
+                status="DISPATCHED",
+            )
+            session.add(db_incident)
+            await session.commit()
+    except Exception as db_err:
+        print(f"[DB Persist Note] Handled graceful fallback: {db_err}")
+
+    # 2. Construct standardized C4ISR incident payload with comprehensive coordinate normalization
     dispatch_msg = {
         "status": "DISPATCHED",
-        "incident_id": payload.get("id") or f"INC-{int(time.time())}",
+        "incident_id": incident_id,
+        "id": incident_id,
         "incident_type": incident_type,
+        "type": incident_type,
         "severity_level": severity_level,
-        "incident_summary": payload.get("description") or "Emergency incident reported.",
+        "severity": severity_level,
+        "incident_summary": description,
+        "description": description,
         "lat": lat,
         "lon": lon,
+        "latitude": lat,
+        "longitude": lon,
+        "lng": lon,
+        "coordinates": {
+            "lat": lat,
+            "lon": lon,
+            "latitude": lat,
+            "longitude": lon,
+            "lng": lon,
+        },
+        "location": {
+            "lat": lat,
+            "lon": lon,
+            "latitude": lat,
+            "longitude": lon,
+            "lng": lon,
+            "address_or_landmark": "Hebron Tactical Sector",
+        },
         "dispatches": [
-            {"agency_type": "Hospital", "units": 2, "target": "Al-Ahli Hospital", "eta_minutes": 3.5},
-            {"agency_type": "Police", "units": 1, "target": "Hebron Central Police Directorate", "eta_minutes": 4.0}
+            {
+                "agency_type": "Hospital",
+                "institution_id": 101,
+                "institution_name": "Al-Ahli Hospital (المستشفى الأهلي)",
+                "units": 2,
+                "target": "Al-Ahli Hospital",
+                "eta_minutes": 3.5,
+                "resource_type": "HOSPITAL",
+            },
+            {
+                "agency_type": "Police",
+                "institution_id": 202,
+                "institution_name": "Hebron Central Police Directorate",
+                "units": 1,
+                "target": "Hebron Central Police Directorate",
+                "eta_minutes": 4.0,
+                "resource_type": "POLICE",
+            }
         ],
         "units_assigned": {
             "hospital": "Al-Ahli Hospital (المستشفى الأهلي)",
             "police": "Hebron Central Police Directorate"
         },
-        "response_time_eta_max_minutes": 4.0
+        "response_time_eta_max_minutes": 4.0,
+        "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
-    # Broadcast to all connected clients across all tenant groups
+    # 3. Serialize to JSON string per C4ISR real-time synchronization directive
+    new_incident_data_as_json_string = json.dumps(dispatch_msg)
+
+    # 4. Critical: Broadcast newly created incident payload to all connected frontend dashboards
     try:
-        await ws_manager.broadcast_to_tenant("default", dispatch_msg)
-        await ws_manager.broadcast_to_tenant("eoa-global-hq", dispatch_msg)
-        if hasattr(ws_manager, "broadcast"):
-            await ws_manager.broadcast(dispatch_msg)
+        await ws_manager.broadcast(new_incident_data_as_json_string)
+        if hasattr(ws_manager, "broadcast_to_tenant"):
+            await ws_manager.broadcast_to_tenant("default", new_incident_data_as_json_string)
+            await ws_manager.broadcast_to_tenant("eoa-global-hq", new_incident_data_as_json_string)
     except Exception as exc:
-        print(f"[WebSocket Broadcast Notification] {exc}")
+        print(f"[WebSocket Broadcast Notification Error] {exc}")
 
     return dispatch_msg
 

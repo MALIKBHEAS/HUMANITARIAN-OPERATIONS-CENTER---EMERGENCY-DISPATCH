@@ -78,7 +78,9 @@ async def receive_incident_webhook(payload: IncidentCreate, db: Session = Depend
     db.refresh(new_incident)
 
     # 6. Real-Time Broadcast to React Dashboard
-    await ws_manager.broadcast(agent_response)
+    import json
+    new_incident_data_as_json_string = json.dumps(agent_response)
+    await ws_manager.broadcast(new_incident_data_as_json_string)
 
     # 7. Return final response
     return agent_response

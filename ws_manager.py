@@ -29,15 +29,19 @@ class ConnectionManager:
             self.active_connections.remove(websocket)
             logger.info(f"WebSocket client removed. Remaining active: {len(self.active_connections)}")
 
-    async def broadcast(self, message: Dict[str, Any]) -> None:
+    async def broadcast(self, message: Any) -> None:
         """
-        Broadcasts structured JSON payload to all connected clients.
+        Broadcasts structured JSON payload or raw text to all connected clients.
         Automatically purges stale or broken sockets.
+        Supports both dict payloads and pre-serialized JSON strings.
         """
         stale_connections: List[WebSocket] = []
         for connection in list(self.active_connections):
             try:
-                await connection.send_json(message)
+                if isinstance(message, str):
+                    await connection.send_text(message)
+                else:
+                    await connection.send_json(message)
             except Exception as exc:
                 logger.warning(f"Failed to send to client, marking for removal: {exc}")
                 stale_connections.append(connection)

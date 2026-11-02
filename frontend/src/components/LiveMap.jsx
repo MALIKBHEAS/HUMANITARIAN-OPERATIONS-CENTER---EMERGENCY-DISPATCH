@@ -15,6 +15,43 @@ export const GLOBAL_SECTORS = [
   { id: 'riyadh', name: 'Riyadh (الرياض)', center: [24.7136, 46.6753], zoom: 13 },
 ];
 
+
+/**
+ * Universal Coordinate Normalization for C4ISR Telemetry
+ */
+export function extractCoordinates(item) {
+  if (!item) return null;
+
+  const rawLat =
+    item.lat ??
+    item.latitude ??
+    item.coordinates?.lat ??
+    item.coordinates?.latitude ??
+    item.location?.lat ??
+    item.location?.latitude;
+
+  const rawLon =
+    item.lon ??
+    item.lng ??
+    item.longitude ??
+    item.coordinates?.lon ??
+    item.coordinates?.lng ??
+    item.coordinates?.longitude ??
+    item.location?.lon ??
+    item.location?.lng ??
+    item.location?.longitude;
+
+  if (rawLat !== undefined && rawLat !== null && rawLon !== undefined && rawLon !== null) {
+    const lat = typeof rawLat === 'number' ? rawLat : parseFloat(rawLat);
+    const lon = typeof rawLon === 'number' ? rawLon : parseFloat(rawLon);
+    if (!isNaN(lat) && !isNaN(lon)) {
+      return { lat, lon };
+    }
+  }
+
+  return null;
+}
+
 // Auto-Focus helper component: smoothly flies camera to new incident GPS coordinates
 export function MapFlyTo({ position }) {
   const map = useMap();
@@ -129,10 +166,15 @@ export default function LiveMap({ incidents = [], latestIncident = null }) {
     loadResources();
   }, []);
 
-  const latestCoords =
-    latestIncident?.coordinates?.lat && latestIncident?.coordinates?.lon
-      ? [latestIncident.coordinates.lat, latestIncident.coordinates.lon]
-      : selectedSector.center;
+  const latestCoords = useMemo(() => {
+    const parsed = extractCoordinates(latestIncident);
+    if (parsed) return [parsed.lat, parsed.lon];
+    if (incidents && incidents.length > 0) {
+      const firstValid = extractCoordinates(incidents[0]);
+      if (firstValid) return [firstValid.lat, firstValid.lon];
+    }
+    return selectedSector.center;
+  }, [latestIncident, incidents, selectedSector.center]);
 
   // Active Dispatch Routing Vector Lines
   const dispatchLines = useMemo(() => {

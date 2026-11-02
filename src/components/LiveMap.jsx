@@ -48,6 +48,48 @@ export function calculateFovConePolygon(lat, lng, azimuthDeg, fovDeg = 60, zoomM
   return points;
 }
 
+
+/**
+ * Universal Coordinate Normalization for C4ISR Telemetry
+ * Gracefully handles:
+ * - root properties: lat, lon, latitude, longitude, lng
+ * - nested coordinates: coordinates.{lat, lon, latitude, longitude, lng}
+ * - nested location: location.{lat, lon, latitude, longitude, lng}
+ * - float strings or numbers
+ */
+export function extractCoordinates(item) {
+  if (!item) return null;
+
+  const rawLat =
+    item.lat ??
+    item.latitude ??
+    item.coordinates?.lat ??
+    item.coordinates?.latitude ??
+    item.location?.lat ??
+    item.location?.latitude;
+
+  const rawLon =
+    item.lon ??
+    item.lng ??
+    item.longitude ??
+    item.coordinates?.lon ??
+    item.coordinates?.lng ??
+    item.coordinates?.longitude ??
+    item.location?.lon ??
+    item.location?.lng ??
+    item.location?.longitude;
+
+  if (rawLat !== undefined && rawLat !== null && rawLon !== undefined && rawLon !== null) {
+    const lat = typeof rawLat === 'number' ? rawLat : parseFloat(rawLat);
+    const lon = typeof rawLon === 'number' ? rawLon : parseFloat(rawLon);
+    if (!isNaN(lat) && !isNaN(lon)) {
+      return { lat, lon };
+    }
+  }
+
+  return null;
+}
+
 // Tactical CCTV Camera DivIcon with Direction Needle
 const createCctvCameraIcon = (azimuth = 0, mode = 'DAY') => {
   const accentColor = mode === 'IR' ? '#10b981' : mode === 'FLIR' ? '#f97316' : '#06b6d4';
@@ -231,10 +273,15 @@ export default function LiveMap({
     loadResources();
   }, []);
 
-  const latestCoords =
-    latestIncident?.coordinates?.lat && latestIncident?.coordinates?.lon
-      ? [latestIncident.coordinates.lat, latestIncident.coordinates.lon]
-      : selectedSector.center;
+  const latestCoords = useMemo(() => {
+    const parsed = extractCoordinates(latestIncident);
+    if (parsed) return [parsed.lat, parsed.lon];
+    if (incidents && incidents.length > 0) {
+      const firstValid = extractCoordinates(incidents[0]);
+      if (firstValid) return [firstValid.lat, firstValid.lon];
+    }
+    return selectedSector.center;
+  }, [latestIncident, incidents, selectedSector.center]);
 
   // Active Dispatch Routing Vector Lines
   const dispatchLines = useMemo(() => {

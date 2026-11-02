@@ -948,9 +948,12 @@ export const EnterpriseMap = ({
 
         {/* Red Target Markers for Incidents */}
         {incidents.map((inc) => {
-          const lat = inc.latitude || inc.lat
-          const lng = inc.longitude || inc.lng
-          if (!lat || !lng) return null
+          const rawLat = inc.latitude ?? inc.lat ?? inc.coordinates?.lat ?? inc.location?.latitude ?? inc.location?.lat
+          const rawLng = inc.longitude ?? inc.lng ?? inc.lon ?? inc.coordinates?.lng ?? inc.coordinates?.lon ?? inc.location?.longitude ?? inc.location?.lon
+          if (rawLat === undefined || rawLat === null || rawLng === undefined || rawLng === null) return null
+          const lat = Number(rawLat)
+          const lng = Number(rawLng)
+          if (isNaN(lat) || isNaN(lng)) return null
 
           const severity = inc.classification?.severity_level || inc.severity || 3
 

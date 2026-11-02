@@ -95,7 +95,10 @@ export const useLiveFeed = () => {
 
       socket.onmessage = (event) => {
         try {
-          const data = JSON.parse(event.data)
+          let data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data
+          if (typeof data === 'string') {
+            try { data = JSON.parse(data) } catch (_) {}
+          }
 
           if (data.type === 'HEARTBEAT_ACK') return
 

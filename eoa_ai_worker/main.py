@@ -1,6 +1,7 @@
 """
-EOA Autonomous AI Vision Worker Service (Phase 3 C4ISR)
-FastAPI application serving real-time tactical MJPEG video streams and AI telemetry.
+EOA Autonomous AI Vision Worker Service (Phase 4 C4ISR: Hybrid Central CCTV + Edge UAV)
+FastAPI application serving real-time tactical MJPEG video streams,
+dynamic RTSP ingestion, and multi-stream AI telemetry.
 """
 
 import os
@@ -8,10 +9,10 @@ import logging
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import FastAPI, Response, HTTPException
+from fastapi import FastAPI, Response, HTTPException, Path
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from vision_engine import VisionEngine
 
@@ -25,17 +26,17 @@ engine = VisionEngine()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifecycle manager guaranteeing engine start and clean resource teardown."""
-    logger.info("Initializing C4ISR Autonomous AI Vision Worker service...")
+    logger.info("Initializing C4ISR Hybrid Vision Worker service...")
     engine.start()
     yield
-    logger.info("Shutting down AI Vision Worker service and releasing video capture devices...")
+    logger.info("Shutting down AI Vision Worker service and releasing all video capture streams...")
     engine.stop()
 
 
 app = FastAPI(
     title="EOA Autonomous AI Vision Worker",
-    version="1.0.0",
-    description="C4ISR Autonomous YOLOv8 Vision Analytics, Tactical HUD, and Automated Incident Dispatch",
+    version="1.1.0",
+    description="C4ISR Autonomous YOLOv8 Vision Analytics, Multi-Stream RTSP Ingestion, and Automated Incident Dispatch",
     lifespan=lifespan,
 )
 
@@ -65,7 +66,8 @@ def health_check():
     telemetry = engine.get_telemetry_status()
     return {
         "status": telemetry.get("status", "UNKNOWN"),
-        "service": "EOA Autonomous AI Vision Worker",
+        "service": "EOA Autonomous AI Vision Worker (Hybrid Central + Edge)",
+        "active_streams_count": telemetry.get("active_streams_count", 0),
         "fps": telemetry.get("fps", 0),
         "total_dispatches": telemetry.get("total_dispatches", 0),
     }
@@ -74,11 +76,33 @@ def health_check():
 @app.get("/stream/cctv-1")
 def stream_cctv_1():
     """
-    Tactical MJPEG stream for Sector 4 CCTV surveillance camera.
+    Primary Tactical MJPEG stream (Sector 4 CCTV / Default Camera).
     Returns multipart/x-mixed-replace JPEG boundary stream.
     """
     return StreamingResponse(
-        engine.generate_mjpeg_stream(),
+        engine.generate_mjpeg_stream("cctv-1"),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+            "Connection": "close",
+        },
+    )
+
+
+@app.get("/stream/{stream_id}")
+def stream_by_id(stream_id: str = Path(..., description="Target camera or RTSP stream identifier")):
+    """
+    Dynamic Tactical MJPEG stream by stream ID.
+    Returns multipart/x-mixed-replace JPEG boundary stream for any dynamic RTSP stream.
+    """
+    worker = engine.get_stream(stream_id)
+    if not worker:
+        raise HTTPException(status_code=404, detail=f"Stream '{stream_id}' not found.")
+
+    return StreamingResponse(
+        engine.generate_mjpeg_stream(stream_id),
         media_type="multipart/x-mixed-replace; boundary=frame",
         headers={
             "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -91,8 +115,73 @@ def stream_cctv_1():
 
 @app.get("/api/vision/status")
 def get_vision_status():
-    """Returns real-time AI telemetry, YOLO detections, and dispatch metrics."""
+    """Returns real-time AI telemetry, YOLO detections, and central stream status."""
     return engine.get_telemetry_status()
+
+
+@app.get("/api/vision/streams")
+def list_active_streams():
+    """Returns telemetry and health status for all active CCTV & RTSP streams."""
+    return {
+        "count": len(engine._streams),
+        "streams": engine.list_streams(),
+    }
+
+
+class AddStreamRequest(BaseModel):
+    rtsp_url: str = Field(..., description="RTSP URL, HTTP stream URL, webcam index, or 'synthetic'")
+    sector: str = Field(..., description="Tactical sector or street camera name")
+    lat: Optional[float] = Field(31.5326, description="Sensor latitude")
+    lon: Optional[float] = Field(35.0998, description="Sensor longitude")
+    stream_id: Optional[str] = Field(None, description="Optional custom stream ID")
+
+
+@app.post("/api/vision/add-stream")
+def add_tactical_rtsp_stream(req: AddStreamRequest):
+    """
+    Dynamically ingests a live RTSP street camera into the AI tracking engine.
+    Spawns an isolated background thread for capture and YOLO object detection.
+    """
+    try:
+        worker = engine.add_stream(
+            rtsp_url=req.rtsp_url,
+            sector=req.sector,
+            lat=req.lat,
+            lon=req.lon,
+            stream_id=req.stream_id,
+        )
+
+        stream_url = f"/stream/{worker.stream_id}"
+        full_stream_url = f"http://localhost:8080{stream_url}"
+
+        logger.info(f"Operator initialized tactical stream [{worker.stream_id}] for sector '{req.sector}'.")
+
+        return {
+            "status": "STREAM_INITIALIZED",
+            "message": f"Tactical RTSP sensor initialized on sector '{req.sector}'.",
+            "stream_id": worker.stream_id,
+            "stream_name": worker.stream_name,
+            "video_source": worker.video_source,
+            "stream_url": stream_url,
+            "full_stream_url": full_stream_url,
+            "telemetry": worker.get_telemetry_status(),
+        }
+    except Exception as exc:
+        logger.error(f"Failed to initialize RTSP stream: {exc}")
+        raise HTTPException(status_code=500, detail=f"Failed to initialize stream: {str(exc)}")
+
+
+@app.delete("/api/vision/stream/{stream_id}")
+def remove_stream(stream_id: str):
+    """Gracefully terminates and releases resources for a dynamic stream."""
+    if stream_id == "cctv-1":
+        raise HTTPException(status_code=400, detail="Cannot terminate primary system stream 'cctv-1'.")
+
+    removed = engine.remove_stream(stream_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail=f"Stream '{stream_id}' not found.")
+
+    return {"status": "STREAM_TERMINATED", "stream_id": stream_id}
 
 
 class ManualTriggerRequest(BaseModel):

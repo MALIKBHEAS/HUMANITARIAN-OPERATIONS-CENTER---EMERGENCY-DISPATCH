@@ -746,6 +746,11 @@ export const Dashboard = () => {
         activeCameraId={activeCameraId}
         onUpdateCamera={handleUpdateCamera}
         onSelectCamera={(cam) => setActiveCameraId(cam.id)}
+        onAddCamera={(newCam) => {
+          setCameras((prev) => [...prev, newCam])
+          setActiveCameraId(newCam.id)
+          triggerToast(`NEW RTSP SENSOR REGISTERED: ${newCam.name}`)
+        }}
         activeIncident={activeIncident}
       />
 

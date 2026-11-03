@@ -139,6 +139,32 @@ services:
     networks:
       - eoa_network
 
+  # ---------------------------------------------------------------------------
+  # 7. EOA Autonomous AI Vision Worker (OpenCV + YOLOv8 Real-Time Analytics)
+  # ---------------------------------------------------------------------------
+  ai-worker:
+    build:
+      context: ./eoa_ai_worker
+      dockerfile: Dockerfile
+    container_name: eoa-ai-worker
+    restart: always
+    depends_on:
+      - backend
+    environment:
+      VIDEO_SOURCE: "synthetic"
+      BACKEND_WEBHOOK_URL: "http://backend:8000/api/webhook/incident"
+      DETECTION_CONF_THRESHOLD: "0.45"
+      CONSECUTIVE_FRAMES_TRIGGER: "5"
+      DISPATCH_COOLDOWN_SECONDS: "30"
+      CCTV_STREAM_NAME: "CCTV-SECTOR-04-NORTH"
+      CCTV_LOCATION_LAT: "31.5326"
+      CCTV_LOCATION_LON: "35.0998"
+      PORT: "8080"
+    ports:
+      - "8080:8080"
+    networks:
+      - eoa_network
+
 # -----------------------------------------------------------------------------
 # Persistent Volumes & Network Definitions
 # -----------------------------------------------------------------------------

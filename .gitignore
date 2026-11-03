@@ -9,4 +9,5 @@ data/
 *.db
 *.sqlite
 *.sqlite3
+*.pt
 .pytest_cache/

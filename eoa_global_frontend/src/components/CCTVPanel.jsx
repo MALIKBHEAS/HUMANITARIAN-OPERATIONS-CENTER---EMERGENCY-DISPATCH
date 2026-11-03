@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react'
+import React, { useMemo, useState } from 'react'
 import {
   Video,
   X,
@@ -28,6 +28,7 @@ export const CCTVPanel = ({
 }) => {
   if (!cctvConfig || !cctvConfig.active) return null
 
+  const [showPip, setShowPip] = useState(false)
   const lat = Number(cctvConfig.lat || 0).toFixed(6)
   const lng = Number(cctvConfig.lng || 0).toFixed(6)
   const azimuth = Math.round(cctvConfig.azimuth || 0)
@@ -263,6 +264,58 @@ export const CCTVPanel = ({
             [ FLIR ]
           </button>
         </div>
+      </div>
+
+      {/* ------------------------------------------------------------- */}
+      {/* 5. TACTICAL AI OPTICAL FEED (PIP / LIVE STREAM)               */}
+      {/* ------------------------------------------------------------- */}
+      <div className="mb-3 p-2.5 rounded-lg bg-slate-950/70 border border-slate-800">
+        <div className="flex items-center justify-between mb-1.5">
+          <span className="text-[10px] font-bold text-slate-300 flex items-center gap-1.5">
+            <Radio className="w-3 h-3 text-purple-400" />
+            AI OPTICAL FEED (LIVE PIP):
+          </span>
+          <button
+            type="button"
+            onClick={() => setShowPip(!showPip)}
+            className={`px-2 py-0.5 rounded text-[10px] font-bold border transition-all cursor-pointer ${
+              showPip
+                ? 'bg-purple-600 text-white border-purple-400'
+                : 'bg-slate-800 text-purple-300 border-slate-700 hover:text-white'
+            }`}
+          >
+            {showPip ? 'HIDE PIP' : 'SHOW PIP'}
+          </button>
+        </div>
+
+        {showPip && (
+          <div className="relative aspect-video w-full rounded-lg overflow-hidden border border-purple-500/50 bg-black mt-2 shadow-inner">
+            <img
+              src="http://localhost:8080/stream/cctv-1"
+              alt="Live AI Video Stream"
+              className="w-full h-full object-cover"
+              onError={(e) => {
+                e.target.onerror = null
+                e.target.style.display = 'none'
+                const fallback = document.getElementById('cctv-pip-fallback')
+                if (fallback) fallback.style.display = 'flex'
+              }}
+            />
+            <div
+              id="cctv-pip-fallback"
+              className="hidden absolute inset-0 flex-col items-center justify-center bg-slate-950/90 text-slate-400 text-center p-2"
+            >
+              <span className="text-red-400 font-bold text-[10px]">AI WORKER OFFLINE</span>
+              <span className="text-[9px] text-slate-500">Checking port 8080...</span>
+            </div>
+
+            {/* Tactical PIP Overlay Watermark */}
+            <div className="absolute top-1 left-2 flex items-center gap-1 text-[9px] font-mono text-purple-300 bg-black/60 px-1.5 py-0.5 rounded pointer-events-none">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span>YOLOv8 // :8080</span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ------------------------------------------------------------- */}

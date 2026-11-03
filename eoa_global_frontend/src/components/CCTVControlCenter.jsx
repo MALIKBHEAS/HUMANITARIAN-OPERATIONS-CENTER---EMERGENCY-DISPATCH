@@ -21,6 +21,19 @@ import {
 // Default Virtual Geographic Humanitarian Cameras
 export const DEFAULT_CAMERAS = [
   {
+    id: 'CAM-AI-01-SECTOR4',
+    name: 'Sector 4 AI Tactical Feed',
+    location: 'Sector 4 High-Altitude PTZ - Autonomous AI Drone',
+    lat: 31.5326,
+    lng: 35.0998,
+    heading: 45,
+    fov: 60,
+    rangeMeters: 800,
+    status: 'ACTIVE',
+    sourceType: 'ai-yolo',
+    streamUrl: 'http://localhost:8080/stream/cctv-1',
+  },
+  {
     id: 'CAM-01-CENTRAL',
     name: 'Central Sector Surveillance',
     location: 'Omar Al-Mukhtar St - Central Sector',
@@ -253,6 +266,21 @@ export const CCTVControlCenter = ({
                   <span>THERMAL</span>
                   <span className="text-[10px] px-1 py-0.2 rounded bg-slate-900/60 font-mono">SIMULATION</span>
                 </button>
+
+                <button
+                  type="button"
+                  onClick={() => setVisionMode('AI_YOLO')}
+                  className={`px-3 py-1 rounded-md text-xs font-semibold transition-all border flex items-center gap-1 cursor-pointer ${
+                    visionMode === 'AI_YOLO'
+                      ? 'bg-purple-600 text-white border-purple-300 font-bold shadow-sm ring-2 ring-purple-500/50'
+                      : 'bg-slate-800 text-purple-300 border-slate-700 hover:text-white hover:border-purple-500/50'
+                  }`}
+                  title="Direct AI Vision stream from port 8080 with YOLOv8 inference"
+                >
+                  <Radio className="w-3.5 h-3.5 text-purple-400 animate-pulse" />
+                  <span>AI YOLO STREAM</span>
+                  <span className="text-[10px] px-1 py-0.2 rounded bg-purple-950/80 text-purple-300 border border-purple-800 font-mono">LIVE :8080</span>
+                </button>
               </div>
 
               {/* Zoom & Snapshot */}
@@ -302,45 +330,75 @@ export const CCTVControlCenter = ({
             {/* Video Feed Canvas Display */}
             <div className="flex-1 relative bg-slate-950 overflow-hidden flex items-center justify-center min-h-[340px]">
               
-              {/* Filter Applied Container */}
-              <div
-                className="w-full h-full relative transition-transform duration-300 ease-out flex items-center justify-center"
-                style={{
-                  transform: `scale(${zoom})`,
-                  filter:
-                    visionMode === 'IR_SIM'
-                      ? 'grayscale(100%) contrast(140%) brightness(120%) sepia(100%) hue-rotate(85deg) saturate(320%)'
-                      : visionMode === 'FLIR_SIM'
-                      ? 'contrast(200%) brightness(110%) sepia(100%) hue-rotate(280deg) saturate(500%)'
-                      : 'none',
-                }}
-              >
-                {/* Surveillance Scene Graphic */}
+              {visionMode === 'AI_YOLO' || activeCam.sourceType === 'ai-yolo' ? (
+                /* Live MJPEG AI Vision Stream from eoa_ai_worker (Port 8080) */
+                <div className="w-full h-full relative flex items-center justify-center bg-black overflow-hidden">
+                  <img
+                    src={activeCam.streamUrl || 'http://localhost:8080/stream/cctv-1'}
+                    alt="C4ISR AI Video Stream"
+                    className="w-full h-full object-contain"
+                    style={{ transform: `scale(${zoom})`, transition: 'transform 0.2s ease-out' }}
+                    onError={(e) => {
+                      e.target.onerror = null
+                      e.target.style.display = 'none'
+                      const fallback = document.getElementById('ai-stream-fallback')
+                      if (fallback) fallback.style.display = 'flex'
+                    }}
+                  />
+                  <div
+                    id="ai-stream-fallback"
+                    className="hidden absolute inset-0 flex-col items-center justify-center bg-slate-950 text-slate-400 font-mono text-center p-6 space-y-2"
+                  >
+                    <div className="w-12 h-12 rounded-full border-2 border-red-500/50 flex items-center justify-center text-red-400 animate-pulse">
+                      <AlertCircle className="w-6 h-6" />
+                    </div>
+                    <div className="text-white font-bold text-sm tracking-wide">AI WORKER STREAM DISCONNECTED</div>
+                    <p className="text-xs text-slate-500 max-w-sm">
+                      Check AI Worker container on port 8080 (http://localhost:8080/stream/cctv-1).
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                /* Simulated Tactical HUD Feed */
                 <div
-                  className="w-full h-full absolute inset-0"
+                  className="w-full h-full relative transition-transform duration-300 ease-out flex items-center justify-center"
                   style={{
-                    backgroundColor:
-                      visionMode === 'IR_SIM' ? '#041d0e' : visionMode === 'FLIR_SIM' ? '#110b27' : '#080d17',
-                    backgroundImage: `
-                      radial-gradient(circle at 50% 50%, ${
-                        visionMode === 'IR_SIM' ? '#0e3a1f' : visionMode === 'FLIR_SIM' ? '#270e4e' : '#101c30'
-                      } 0%, transparent 80%),
-                      linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
-                      linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px)
-                    `,
-                    backgroundSize: '100% 100%, 28px 28px, 28px 28px',
+                    transform: `scale(${zoom})`,
+                    filter:
+                      visionMode === 'IR_SIM'
+                        ? 'grayscale(100%) contrast(140%) brightness(120%) sepia(100%) hue-rotate(85deg) saturate(320%)'
+                        : visionMode === 'FLIR_SIM'
+                        ? 'contrast(200%) brightness(110%) sepia(100%) hue-rotate(280deg) saturate(500%)'
+                        : 'none',
                   }}
                 >
-                  {/* Subtle Iso-geometry Overlay */}
-                  <svg className="w-full h-full opacity-50" viewBox="0 0 640 360">
-                    <line x1="0" y1="180" x2="640" y2="180" stroke="#0ea5e9" strokeWidth="0.75" strokeDasharray="4 6" opacity="0.4" />
-                    <line x1="320" y1="0" x2="320" y2="360" stroke="#0ea5e9" strokeWidth="0.75" strokeDasharray="4 6" opacity="0.4" />
-                    <circle cx="320" cy="180" r="120" fill="none" stroke="#0ea5e9" strokeWidth="0.75" strokeDasharray="3 5" opacity="0.3" />
-                    <circle cx="320" cy="180" r="40" fill="none" stroke="#0ea5e9" strokeWidth="1" opacity="0.5" />
-                    <circle cx="320" cy="180" r="3" fill="#ef4444" />
-                  </svg>
+                  {/* Surveillance Scene Graphic */}
+                  <div
+                    className="w-full h-full absolute inset-0"
+                    style={{
+                      backgroundColor:
+                        visionMode === 'IR_SIM' ? '#041d0e' : visionMode === 'FLIR_SIM' ? '#110b27' : '#080d17',
+                      backgroundImage: `
+                        radial-gradient(circle at 50% 50%, ${
+                          visionMode === 'IR_SIM' ? '#0e3a1f' : visionMode === 'FLIR_SIM' ? '#270e4e' : '#101c30'
+                        } 0%, transparent 80%),
+                        linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+                        linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px)
+                      `,
+                      backgroundSize: '100% 100%, 28px 28px, 28px 28px',
+                    }}
+                  >
+                    {/* Subtle Iso-geometry Overlay */}
+                    <svg className="w-full h-full opacity-50" viewBox="0 0 640 360">
+                      <line x1="0" y1="180" x2="640" y2="180" stroke="#0ea5e9" strokeWidth="0.75" strokeDasharray="4 6" opacity="0.4" />
+                      <line x1="320" y1="0" x2="320" y2="360" stroke="#0ea5e9" strokeWidth="0.75" strokeDasharray="4 6" opacity="0.4" />
+                      <circle cx="320" cy="180" r="120" fill="none" stroke="#0ea5e9" strokeWidth="0.75" strokeDasharray="3 5" opacity="0.3" />
+                      <circle cx="320" cy="180" r="40" fill="none" stroke="#0ea5e9" strokeWidth="1" opacity="0.5" />
+                      <circle cx="320" cy="180" r="3" fill="#ef4444" />
+                    </svg>
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Top Viewport HUD Overlay */}
               <div className="absolute top-3 inset-x-4 z-10 flex items-start justify-between text-xs font-mono text-cyan-300 drop-shadow pointer-events-none">
@@ -374,10 +432,19 @@ export const CCTVControlCenter = ({
               <div className="absolute bottom-3 inset-x-4 z-10 flex items-center justify-between text-xs font-mono text-slate-300 bg-slate-900/85 px-3 py-1.5 rounded-lg border border-slate-800 pointer-events-none">
                 <div className="flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                  <span>STREAM: <strong className="text-white">SIMULATED TEST PATTERN</strong></span>
+                  <span>
+                    STREAM:{' '}
+                    <strong className="text-white">
+                      {visionMode === 'AI_YOLO' || activeCam.sourceType === 'ai-yolo'
+                        ? 'AI YOLOv8 EDGE WORKER (LIVE FEED)'
+                        : 'SIMULATED TEST PATTERN'}
+                    </strong>
+                  </span>
                 </div>
                 <div className="text-slate-400 text-[11px]">
-                  RTSP/HLS INTEGRATION READY
+                  {visionMode === 'AI_YOLO' || activeCam.sourceType === 'ai-yolo'
+                    ? 'AUTONOMOUS C4ISR SURVEILLANCE'
+                    : 'RTSP/HLS INTEGRATION READY'}
                 </div>
               </div>
             </div>

@@ -5,14 +5,15 @@ import { Dashboard } from './pages/Dashboard'
 import { Login } from './pages/Login'
 import './i18n/config'
 
-// Protected Route Guard
+// Protected Route Guard: Blocks all access to Dashboard, LiveMap, and CCTVControlCenter without valid JWT
 const ProtectedRoute = ({ children }) => {
   const { isAuthenticated, loading } = useAuth()
 
   if (loading) {
     return (
-      <div className="h-screen w-screen bg-slate-950 flex items-center justify-center text-cyan-400 font-mono text-xs">
-        INITIALIZING EOC SESSION...
+      <div className="h-screen w-screen bg-slate-950 flex flex-col items-center justify-center text-cyan-400 font-mono text-xs gap-3">
+        <div className="w-8 h-8 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
+        <span className="tracking-widest uppercase">VERIFYING C4ISR ZERO-TRUST SECURITY CLEARANCE...</span>
       </div>
     )
   }
@@ -24,7 +25,7 @@ const ProtectedRoute = ({ children }) => {
   return children
 }
 
-// Public Route Guard (prevents logged in users from seeing login)
+// Public Route Guard: Redirects authenticated operators directly to the C4ISR Dashboard
 const PublicRoute = ({ children }) => {
   const { isAuthenticated, loading } = useAuth()
 

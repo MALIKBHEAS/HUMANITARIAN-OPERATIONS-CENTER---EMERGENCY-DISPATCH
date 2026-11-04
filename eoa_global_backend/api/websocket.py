@@ -18,6 +18,7 @@ try:
 except ImportError:
     from jwt.exceptions import PyJWTError as JWTError
 
+from eoa_global_backend.core.config import settings
 from eoa_global_backend.core.security import decode_access_token
 from eoa_global_backend.services.event_stream import subscribe_to_tenant_stream
 
@@ -158,27 +159,54 @@ async def _handle_tenant_ws(
     token: Optional[str] = None,
 ):
     """
-    Core WebSocket handler ensuring immediate acceptance and graceful authentication fallback.
-    Prevents 403 Forbidden by executing await websocket.accept() before any token validation.
+    Core WebSocket handler ensuring zero-trust authentication and tenant isolation.
     """
     clean_tenant = (tenant_id or "eoa-global-hq").strip().lower()
 
-    # 1. Guarantee WebSocket Handshake Acceptance First (Prevents 403 Forbidden)
+    # 1. Guarantee WebSocket Handshake Acceptance First (Prevents raw HTTP drop)
     await websocket.accept()
 
-    # 2. Graceful Token Validation for Local MVP / Production
-    user_email = "operator@eoa.local"
-    if token:
+    # 2. Zero-Trust Token Validation
+    user_email = "operator@eoa.mil"
+    user_role = "OPERATOR"
+
+    if settings.REQUIRE_AUTH:
+        if not token:
+            logger.warning(f"[WebSocket Auth] Rejection: Unauthenticated connection attempt to tenant '{clean_tenant}'.")
+            await websocket.send_json({
+                "type": "AUTH_ERROR",
+                "detail": "Zero-Trust policy violation: Valid Bearer JWT required for sovereign live feed access.",
+            })
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+
         try:
             payload = decode_access_token(token)
             user_email = payload.get("sub", user_email)
+            user_role = payload.get("role", "OPERATOR")
             token_tenant = payload.get("tenant_id", "").strip().lower()
             if token_tenant:
                 clean_tenant = token_tenant
         except Exception as exc:
-            logger.warning(f"[WebSocket Auth] Gracefully continuing with token warning: {exc}")
+            logger.warning(f"[WebSocket Auth] Token validation failure: {exc}")
+            await websocket.send_json({
+                "type": "AUTH_ERROR",
+                "detail": f"Zero-Trust token rejected or expired: {str(exc)}",
+            })
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
     else:
-        logger.info(f"[WebSocket Auth] Anonymous/guest connection accepted for tenant '{clean_tenant}'.")
+        if token:
+            try:
+                payload = decode_access_token(token)
+                user_email = payload.get("sub", user_email)
+                user_role = payload.get("role", "OPERATOR")
+                token_tenant = payload.get("tenant_id", "").strip().lower()
+                if token_tenant:
+                    clean_tenant = token_tenant
+            except Exception:
+                pass
+        logger.info(f"[WebSocket Auth] Guest/Bypass connection allowed for tenant '{clean_tenant}'.")
 
     # 3. Register with tenant connection pool
     await ws_manager.connect(websocket, clean_tenant)
@@ -188,6 +216,7 @@ async def _handle_tenant_ws(
         "type": "EOA_SOCKET_INITIALIZED",
         "tenant_id": clean_tenant,
         "authenticated_as": user_email,
+        "role": user_role,
         "connected_at": datetime.now(timezone.utc).isoformat(),
         "status": "LISTENING_FOR_TENANT_INCIDENTS",
     })

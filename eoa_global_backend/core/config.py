@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "eoa-enterprise-super-secret-key-change-in-production-2026-global"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 Hours
+    REQUIRE_AUTH: bool = True
 
     # Database Configuration (PostgreSQL + PostGIS)
     POSTGRES_SERVER: str = "localhost"

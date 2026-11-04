@@ -20,6 +20,8 @@ class Token(BaseModel):
     token_type: str = Field("bearer", description="Token schema type")
     tenant_id: str = Field(..., description="Organization tenant identity")
     expires_in_seconds: int = Field(..., description="Token lifespan in seconds")
+    role: Optional[str] = Field("OPERATOR", description="Assigned role: COMMANDER, OPERATOR, FIELD_UNIT")
+    user: Optional[dict] = Field(None, description="Basic user metadata payload")
 
 
 class TokenPayload(BaseModel):

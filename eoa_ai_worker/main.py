@@ -9,7 +9,12 @@ import logging
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import FastAPI, Response, HTTPException, Path
+try:
+    import jwt
+except ImportError:
+    jwt = None
+
+from fastapi import FastAPI, Response, HTTPException, Path, Request
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -18,6 +23,52 @@ from vision_engine import VisionEngine
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("eoa.ai_worker.api")
+
+SECRET_KEY = os.getenv("SECRET_KEY", "eoa-enterprise-super-secret-key-change-in-production-2026-global")
+REQUIRE_AUTH = os.getenv("REQUIRE_AUTH", "true").lower() in ("true", "1", "yes")
+
+import base64
+import hashlib
+import hmac
+import json
+import time
+
+def verify_token(authorization: Optional[str] = None, required_roles: Optional[list] = None) -> dict:
+    """Verifies Bearer JWT token and enforces C4ISR role boundaries."""
+    if not REQUIRE_AUTH:
+        return {"sub": "bypass@eoa.mil", "role": "COMMANDER"}
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Authentication token required (Bearer JWT).")
+    token = authorization.split(" ", 1)[1].strip()
+
+    try:
+        if jwt:
+            payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+        else:
+            parts = token.split(".")
+            if len(parts) != 3:
+                raise ValueError("Invalid JWT token format.")
+            msg = f"{parts[0]}.{parts[1]}".encode()
+            sig = hmac.new(SECRET_KEY.encode(), msg, hashlib.sha256).digest()
+            expected_sig = base64.urlsafe_b64encode(sig).decode().rstrip("=")
+            if not hmac.compare_digest(parts[2].rstrip("="), expected_sig):
+                raise ValueError("Cryptographic signature mismatch.")
+            padded = parts[1] + "=" * ((4 - len(parts[1]) % 4) % 4)
+            payload = json.loads(base64.urlsafe_b64decode(padded).decode())
+            if payload.get("exp", 0) < time.time():
+                raise ValueError("Token has expired.")
+
+        role = payload.get("role", "OPERATOR")
+        if required_roles and role not in required_roles and not payload.get("is_superuser", False):
+            raise HTTPException(
+                status_code=403,
+                detail=f"Forbidden. Required role: {', '.join(required_roles)}. Current: {role}",
+            )
+        return payload
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=401, detail=f"Invalid or expired token: {str(exc)}")
 
 # Initialize global Vision Engine singleton
 engine = VisionEngine()
@@ -137,11 +188,13 @@ class AddStreamRequest(BaseModel):
 
 
 @app.post("/api/vision/add-stream")
-def add_tactical_rtsp_stream(req: AddStreamRequest):
+def add_tactical_rtsp_stream(req: AddStreamRequest, request: Request):
     """
     Dynamically ingests a live RTSP street camera into the AI tracking engine.
     Spawns an isolated background thread for capture and YOLO object detection.
+    Protected: Requires COMMANDER role.
     """
+    verify_token(request.headers.get("Authorization"), required_roles=["COMMANDER"])
     try:
         worker = engine.add_stream(
             rtsp_url=req.rtsp_url,
@@ -166,14 +219,17 @@ def add_tactical_rtsp_stream(req: AddStreamRequest):
             "full_stream_url": full_stream_url,
             "telemetry": worker.get_telemetry_status(),
         }
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error(f"Failed to initialize RTSP stream: {exc}")
         raise HTTPException(status_code=500, detail=f"Failed to initialize stream: {str(exc)}")
 
 
 @app.delete("/api/vision/stream/{stream_id}")
-def remove_stream(stream_id: str):
-    """Gracefully terminates and releases resources for a dynamic stream."""
+def remove_stream(stream_id: str, request: Request):
+    """Gracefully terminates and releases resources for a dynamic stream. Requires COMMANDER role."""
+    verify_token(request.headers.get("Authorization"), required_roles=["COMMANDER"])
     if stream_id == "cctv-1":
         raise HTTPException(status_code=400, detail="Cannot terminate primary system stream 'cctv-1'.")
 

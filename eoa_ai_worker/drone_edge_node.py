@@ -365,10 +365,30 @@ class DroneEdgeVisionEngine:
         ]
         unique_urls = list(dict.fromkeys(candidate_urls))
 
+        headers = {"Content-Type": "application/json"}
+        try:
+            import jwt
+            secret = os.getenv("SECRET_KEY", "eoa-enterprise-super-secret-key-change-in-production-2026-global")
+            token = jwt.encode(
+                {
+                    "sub": "uav-recon-drone-01@eoa.mil",
+                    "role": "FIELD_UNIT",
+                    "tenant_id": "eoa-global-hq",
+                    "name": "Autonomous UAV Edge Node",
+                    "iat": int(time.time()),
+                    "exp": int(time.time()) + 86400 * 365,
+                },
+                secret,
+                algorithm="HS256",
+            )
+            headers["Authorization"] = f"Bearer {token}"
+        except Exception:
+            pass
+
         dispatched = False
         for url in unique_urls:
             try:
-                res = requests.post(url, json=payload, timeout=3.5)
+                res = requests.post(url, json=payload, headers=headers, timeout=3.5)
                 if res.status_code in [200, 201, 202]:
                     resp_json = res.json()
                     inc_id = resp_json.get("incident_id") or resp_json.get("id") or "UNKNOWN"

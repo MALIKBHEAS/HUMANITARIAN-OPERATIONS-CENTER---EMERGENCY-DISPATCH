@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react'
+import { useAuth } from '../context/AuthContext'
+import { apiClient } from '../services/api'
 import {
   Video,
   X,
@@ -84,6 +86,8 @@ export const CCTVControlCenter = ({
   onAddCamera = null,
   onCaptureSnapshot = null,
 }) => {
+  const { user } = useAuth()
+  const isCommander = user?.role === 'COMMANDER' || user?.is_superuser === true
   const [selectedCamId, setSelectedCamId] = useState(activeCameraId)
   const [visionMode, setVisionMode] = useState('DAY') // 'DAY' | 'IR_SIM' | 'FLIR_SIM' | 'AI_YOLO'
   const [zoom, setZoom] = useState(1)
@@ -141,22 +145,13 @@ export const CCTVControlCenter = ({
     const lon = activeCam?.lng || 35.0998
 
     try {
-      const response = await fetch('http://localhost:8080/api/vision/add-stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          rtsp_url: rawUrl,
-          sector: sector,
-          lat: lat,
-          lon: lon,
-        }),
+      const data = await apiClient.post('/vision/add-stream', {
+        rtsp_url: rawUrl,
+        sector: sector,
+        lat: lat,
+        lon: lon,
       })
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: Failed to initialize sensor stream.`)
-      }
-
-      const data = await response.json()
       const streamId = data.stream_id || `CAM-RTSP-${Date.now().toString().slice(-4)}`
       const fullStreamUrl = data.full_stream_url || `http://localhost:8080${data.stream_url || `/stream/${streamId}`}`
 
@@ -726,79 +721,81 @@ export const CCTVControlCenter = ({
               )}
             </div>
 
-            {/* Group 5: Dynamic RTSP Feed Ingestion */}
-            <div className="space-y-2 pt-2 border-t border-slate-800">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
-                <h3 className="text-xs font-bold text-cyan-400 uppercase tracking-wider flex items-center gap-1.5">
-                  <Radio className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
-                  <span>E. Dynamic RTSP Ingestion</span>
-                </h3>
-                <span className="text-[10px] px-1.5 py-0.2 rounded bg-cyan-950 text-cyan-300 border border-cyan-800 font-mono">
-                  CENTRAL AI :8080
-                </span>
-              </div>
-
-              <div className="p-2.5 bg-slate-950/80 border border-cyan-500/30 rounded-lg space-y-2">
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-300 mb-1">
-                    ADD TACTICAL RTSP FEED
-                  </label>
-                  <input
-                    type="text"
-                    value={newRtspUrl}
-                    onChange={(e) => setNewRtspUrl(e.target.value)}
-                    placeholder="rtsp://192.168.1.120:554/live or http://... or synthetic"
-                    className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-white font-mono placeholder:text-slate-500 focus:outline-none focus:border-cyan-400"
-                  />
+            {/* Group 5: Dynamic RTSP Feed Ingestion (RBAC Enforced: Commander Only) */}
+            {isCommander && (
+              <div className="space-y-2 pt-2 border-t border-slate-800">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
+                  <h3 className="text-xs font-bold text-cyan-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <Radio className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
+                    <span>E. Dynamic RTSP Ingestion</span>
+                  </h3>
+                  <span className="text-[10px] px-1.5 py-0.2 rounded font-mono border bg-cyan-950 text-cyan-300 border-cyan-800">
+                    COMMANDER CLEARANCE
+                  </span>
                 </div>
 
-                <div>
-                  <label className="block text-[11px] font-medium text-slate-400 mb-1">
-                    Sector / Camera Identifier
-                  </label>
-                  <input
-                    type="text"
-                    value={newSectorName}
-                    onChange={(e) => setNewSectorName(e.target.value)}
-                    placeholder="e.g., Sector 7 Commercial Corridor"
-                    className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-cyan-400"
-                  />
-                </div>
-
-                {rtspFeedback && (
-                  <div
-                    className={`text-[11px] font-mono p-1.5 rounded border ${
-                      rtspFeedback.type === 'error'
-                        ? 'bg-red-950/60 border-red-500/60 text-red-300'
-                        : rtspFeedback.type === 'success'
-                        ? 'bg-emerald-950/60 border-emerald-500/60 text-emerald-300'
-                        : 'bg-cyan-950/60 border-cyan-500/60 text-cyan-300'
-                    }`}
-                  >
-                    {rtspFeedback.text}
+                <div className="p-2.5 bg-slate-950/80 border border-cyan-500/30 rounded-lg space-y-2">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                      ADD TACTICAL RTSP FEED
+                    </label>
+                    <input
+                      type="text"
+                      value={newRtspUrl}
+                      onChange={(e) => setNewRtspUrl(e.target.value)}
+                      placeholder="rtsp://192.168.1.120:554/live or http://... or synthetic"
+                      className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-white font-mono placeholder:text-slate-500 focus:outline-none focus:border-cyan-400"
+                    />
                   </div>
-                )}
 
-                <button
-                  type="button"
-                  onClick={handleInitializeSensor}
-                  disabled={isInitializingSensor || !newRtspUrl.trim()}
-                  className="w-full py-2 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-slate-950 font-bold text-xs uppercase tracking-wider rounded transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  {isInitializingSensor ? (
-                    <>
-                      <span className="w-3.5 h-3.5 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
-                      <span>INITIALIZING SENSOR THREAD...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Radio className="w-3.5 h-3.5 text-slate-950" />
-                      <span>INITIALIZE SENSOR</span>
-                    </>
+                  <div>
+                    <label className="block text-[11px] font-medium text-slate-400 mb-1">
+                      Sector / Camera Identifier
+                    </label>
+                    <input
+                      type="text"
+                      value={newSectorName}
+                      onChange={(e) => setNewSectorName(e.target.value)}
+                      placeholder="e.g., Sector 7 Commercial Corridor"
+                      className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-cyan-400"
+                    />
+                  </div>
+
+                  {rtspFeedback && (
+                    <div
+                      className={`text-[11px] font-mono p-1.5 rounded border ${
+                        rtspFeedback.type === 'error'
+                          ? 'bg-red-950/60 border-red-500/60 text-red-300'
+                          : rtspFeedback.type === 'success'
+                          ? 'bg-emerald-950/60 border-emerald-500/60 text-emerald-300'
+                          : 'bg-cyan-950/60 border-cyan-500/60 text-cyan-300'
+                      }`}
+                    >
+                      {rtspFeedback.text}
+                    </div>
                   )}
-                </button>
+
+                  <button
+                    type="button"
+                    onClick={handleInitializeSensor}
+                    disabled={isInitializingSensor || !newRtspUrl.trim()}
+                    className="w-full py-2 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-slate-950 font-bold text-xs uppercase tracking-wider rounded transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    {isInitializingSensor ? (
+                      <>
+                        <span className="w-3.5 h-3.5 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
+                        <span>INITIALIZING SENSOR THREAD...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Radio className="w-3.5 h-3.5 text-slate-950" />
+                        <span>INITIALIZE SENSOR</span>
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
 
           </div>
 

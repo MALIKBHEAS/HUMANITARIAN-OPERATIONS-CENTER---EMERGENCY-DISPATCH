@@ -394,6 +394,25 @@ export const Dashboard = () => {
                 <span className="text-slate-200">{systemHealth.lastSyncTime}</span>
               </div>
             )}
+
+            {/* User Call-sign & RBAC Role Badge */}
+            <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-950 border border-slate-800 text-xs font-mono">
+              <span className="text-slate-400 text-[10px]">AUTH:</span>
+              <span className="text-slate-200 font-bold truncate max-w-[120px]">
+                {user?.name || user?.email?.split('@')[0] || 'SOVEREIGN'}
+              </span>
+              <span
+                className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider ${
+                  user?.role === 'COMMANDER'
+                    ? 'bg-red-950/80 text-red-300 border border-red-700'
+                    : user?.role === 'FIELD_UNIT'
+                    ? 'bg-amber-950/80 text-amber-300 border border-amber-700'
+                    : 'bg-cyan-950/80 text-cyan-300 border border-cyan-700'
+                }`}
+              >
+                {user?.role || 'OPERATOR'}
+              </span>
+            </div>
           </div>
 
           {/* New Incident Dispatch Trigger -> Enters Targeting Mode */}

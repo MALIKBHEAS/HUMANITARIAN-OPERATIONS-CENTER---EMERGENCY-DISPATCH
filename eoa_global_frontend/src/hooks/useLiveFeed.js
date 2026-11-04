@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useAuth } from '../context/AuthContext'
-import { API_BASE_URL, WS_BASE_URL } from '../services/api'
+import { API_BASE_URL, WS_BASE_URL, apiClient, clearAuthAndRedirect } from '../services/api'
 
 // Canonical Tactical Transit Waypoints for Route A (Medical) & Route B (Civil Defense)
 export const TACTICAL_WAYPOINTS = {
@@ -75,7 +75,10 @@ export const useLiveFeed = () => {
   const reconnectTimeoutRef = useRef(null)
 
   const connect = useCallback(() => {
-    if (!token || !tenantId) return
+    if (!token || !tenantId) {
+      setConnectionStatus('disconnected')
+      return
+    }
 
     const wsUrl = `${WS_BASE_URL}/${tenantId}?token=${encodeURIComponent(token)}`
 
@@ -135,12 +138,12 @@ export const useLiveFeed = () => {
               timestamp: data.processed_at || data.timestamp || new Date().toISOString(),
               tenantId: data.tenant_id,
               location: data.parsed_location || data.location?.address_or_landmark || 'General Operational Sector',
-              latitude: data.location?.latitude || data.raw_incident?.latitude || (31.5125 + (Math.random() * 0.02 - 0.01)),
-              longitude: data.location?.longitude || data.raw_incident?.longitude || (34.4533 + (Math.random() * 0.02 - 0.01)),
+              latitude: data.location?.latitude || data.raw_incident?.latitude || data.latitude || (31.5125 + (Math.random() * 0.02 - 0.01)),
+              longitude: data.location?.longitude || data.raw_incident?.longitude || data.longitude || (34.4533 + (Math.random() * 0.02 - 0.01)),
               classification: data.classification || {
-                category: 'General',
-                severity_level: 3,
-                summary: 'Emergency event dispatched.',
+                category: data.category || 'General',
+                severity_level: data.severity_level || 3,
+                summary: data.description || 'Emergency event dispatched.',
               },
               dispatches: data.dispatches || data.tactical_dispatches || [],
               summary: data.summary || data.tactical_summary || {},
@@ -163,6 +166,13 @@ export const useLiveFeed = () => {
       socket.onclose = (event) => {
         setConnectionStatus('disconnected')
         socketRef.current = null
+
+        // 1008 Policy Violation indicates Invalid / Expired JWT Auth Failure
+        if (event.code === 1008) {
+          console.warn('[LiveFeed] WebSocket closed with 1008 Policy Violation (Auth Failure).')
+          clearAuthAndRedirect()
+          return
+        }
 
         if (event.code !== 1000 && !reconnectTimeoutRef.current) {
           reconnectTimeoutRef.current = setTimeout(() => {
@@ -198,22 +208,7 @@ export const useLiveFeed = () => {
 
   const triggerTestSOS = async (sosPayload) => {
     if (!token) return
-
-    const response = await fetch(`${API_BASE_URL}/v1/sos/trigger`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify(sosPayload),
-    })
-
-    if (!response.ok) {
-      const err = await response.json().catch(() => ({}))
-      throw new Error(err.detail || 'Failed to submit SOS')
-    }
-
-    return await response.json()
+    return apiClient.sendIncident(sosPayload)
   }
 
   const addIncident = useCallback((incident) => {
@@ -233,3 +228,5 @@ export const useLiveFeed = () => {
     tenantId,
   }
 }
+
+export default useLiveFeed

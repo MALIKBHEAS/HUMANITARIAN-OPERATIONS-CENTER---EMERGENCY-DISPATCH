@@ -23,13 +23,10 @@ export function getAuthToken() {
  */
 export function getAuthHeaders() {
   const token = getAuthToken()
-  const headers = {
-    'ngrok-skip-browser-warning': 'true',
-  }
   if (token) {
-    headers['Authorization'] = `Bearer ${token}`
+    return { Authorization: `Bearer ${token}` }
   }
-  return headers
+  return {}
 }
 
 /**
@@ -65,11 +62,6 @@ if (typeof window !== 'undefined' && !window.__EOA_FETCH_INTERCEPTED__) {
     const headers = new Headers(
       config?.headers || (typeof resource !== 'string' && resource?.headers ? resource.headers : {})
     )
-
-    // Bypass ngrok interstitial warning page for all outgoing API requests
-    if (!headers.has('ngrok-skip-browser-warning')) {
-      headers.set('ngrok-skip-browser-warning', 'true')
-    }
 
     if (isBackendCall && !headers.has('Authorization')) {
       const token = getAuthToken()

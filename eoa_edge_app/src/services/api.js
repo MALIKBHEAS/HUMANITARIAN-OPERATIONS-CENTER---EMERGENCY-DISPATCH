@@ -37,13 +37,10 @@ export function getAuthToken() {
  */
 export function getAuthHeaders() {
   const token = getAuthToken()
-  const headers = {
-    'ngrok-skip-browser-warning': 'true',
-  }
   if (token) {
-    headers['Authorization'] = `Bearer ${token}`
+    return { Authorization: `Bearer ${token}` }
   }
-  return headers
+  return {}
 }
 
 /**
@@ -65,16 +62,11 @@ if (typeof window !== 'undefined' && !window.__EDGE_FETCH_INTERCEPTED__) {
   const originalFetch = window.fetch
   window.fetch = async (resource, config = {}) => {
     let url = typeof resource === 'string' ? resource : resource?.url || ''
-    const isBackendCall = url.includes(`:${BACKEND_PORT}`) || url.startsWith('/api') || url.startsWith('/v1') || url.includes('ngrok')
+    const isBackendCall = url.includes(`:${BACKEND_PORT}`) || url.startsWith('/api') || url.startsWith('/v1')
 
     const headers = new Headers(
       config?.headers || (typeof resource !== 'string' && resource?.headers ? resource.headers : {})
     )
-
-    // Bypass ngrok interstitial warning page on all outgoing requests
-    if (!headers.has('ngrok-skip-browser-warning')) {
-      headers.set('ngrok-skip-browser-warning', 'true')
-    }
 
     if (isBackendCall && !headers.has('Authorization')) {
       const token = getAuthToken()
@@ -117,7 +109,6 @@ export async function loginFieldUnit(username, password) {
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
-          'ngrok-skip-browser-warning': 'true',
         },
         body: JSON.stringify({
           username: username.trim(),
@@ -219,7 +210,6 @@ export async function transmitEmergencySos({
   const reqHeaders = {
     'Content-Type': 'application/json',
     'Accept': 'application/json',
-    'ngrok-skip-browser-warning': 'true',
   }
 
   if (activeToken) {

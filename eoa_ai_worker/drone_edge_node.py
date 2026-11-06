@@ -356,19 +356,34 @@ class DroneEdgeVisionEngine:
             "security_token": "uav_edge_node_token_v4",
         }
 
+        # 1. Resolve candidate gateways with priority on Docker internal service networking
+        configured_url = (self.backend_url or "").strip()
         candidate_urls = [
-            self.backend_url,
             "http://backend:8000/api/webhook/incident",
-            "http://localhost:9443/api/webhook/incident",
-            "http://127.0.0.1:9443/api/webhook/incident",
-            "http://localhost:8000/api/webhook/incident",
+            "http://eoa-backend-api:8000/api/webhook/incident",
         ]
-        unique_urls = list(dict.fromkeys(candidate_urls))
+        if configured_url:
+            if "localhost" not in configured_url and "127.0.0.1" not in configured_url:
+                candidate_urls.insert(0, configured_url)
+            else:
+                candidate_urls.append(configured_url)
+
+        # Fallback candidates for host-gateway and bare-metal environments
+        candidate_urls.extend([
+            "http://host.docker.internal:8000/api/webhook/incident",
+            "http://host.docker.internal:9443/api/webhook/incident",
+            "http://localhost:8000/api/webhook/incident",
+            "http://localhost:9443/api/webhook/incident",
+            "http://127.0.0.1:8000/api/webhook/incident",
+            "http://127.0.0.1:9443/api/webhook/incident",
+        ])
+        unique_urls = list(dict.fromkeys([u for u in candidate_urls if u]))
 
         headers = {"Content-Type": "application/json"}
+        secret = os.getenv("SECRET_KEY", "eoa-enterprise-super-secret-key-change-in-production-2026-global")
+        token = None
         try:
             import jwt
-            secret = os.getenv("SECRET_KEY", "eoa-enterprise-super-secret-key-change-in-production-2026-global")
             token = jwt.encode(
                 {
                     "sub": "uav-recon-drone-01@eoa.mil",
@@ -381,27 +396,58 @@ class DroneEdgeVisionEngine:
                 secret,
                 algorithm="HS256",
             )
-            headers["Authorization"] = f"Bearer {token}"
         except Exception:
-            pass
+            try:
+                import base64
+                import hashlib
+                import hmac
+                hdr = base64.urlsafe_b64encode(b'{"alg":"HS256","typ":"JWT"}').decode().rstrip("=")
+                pld = base64.urlsafe_b64encode(json.dumps({
+                    "sub": "uav-recon-drone-01@eoa.mil",
+                    "role": "FIELD_UNIT",
+                    "tenant_id": "eoa-global-hq",
+                    "name": "Autonomous UAV Edge Node",
+                    "iat": int(time.time()),
+                    "exp": int(time.time()) + 86400 * 365,
+                }).encode()).decode().rstrip("=")
+                sig = hmac.new(secret.encode(), f"{hdr}.{pld}".encode(), hashlib.sha256).digest()
+                b64_sig = base64.urlsafe_b64encode(sig).decode().rstrip("=")
+                token = f"{hdr}.{pld}.{b64_sig}"
+            except Exception as sig_err:
+                logger.error(f"UAV token generation error: {sig_err}")
+
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
 
         dispatched = False
-        for url in unique_urls:
-            try:
-                res = requests.post(url, json=payload, headers=headers, timeout=3.5)
-                if res.status_code in [200, 201, 202]:
-                    resp_json = res.json()
-                    inc_id = resp_json.get("incident_id") or resp_json.get("id") or "UNKNOWN"
-                    logger.info(f"==> EOC INCIDENT DISPATCH CONFIRMED: Incident ID [{inc_id}] via {url}")
-                    dispatched = True
-                    break
-                else:
-                    logger.warning(f"EOC Gateway responded with HTTP {res.status_code} on {url}")
-            except Exception as net_err:
-                logger.debug(f"Candidate {url} unreachable: {net_err}")
+        max_attempts = 3
+        timeout_seconds = 8.0
+
+        for attempt in range(1, max_attempts + 1):
+            for url in unique_urls:
+                try:
+                    logger.info(f"Transmitting UAV dispatch (attempt {attempt}/{max_attempts}) to Gateway: {url}")
+                    res = requests.post(url, json=payload, headers=headers, timeout=timeout_seconds)
+                    if res.status_code in [200, 201, 202]:
+                        resp_json = res.json()
+                        inc_id = resp_json.get("incident_id") or resp_json.get("id") or "UNKNOWN"
+                        logger.info(f"==> EOC INCIDENT DISPATCH CONFIRMED: Incident ID [{inc_id}] via {url}")
+                        dispatched = True
+                        break
+                    elif res.status_code == 401:
+                        logger.warning(f"EOC Gateway 401 Unauthorized on {url}: {res.text}")
+                    else:
+                        logger.warning(f"EOC Gateway responded with HTTP {res.status_code} on {url}")
+                except Exception as net_err:
+                    logger.debug(f"Candidate {url} (attempt {attempt}) unreachable: {net_err}")
+
+            if dispatched:
+                break
+            if attempt < max_attempts:
+                time.sleep(1.0 * attempt)
 
         if not dispatched:
-            logger.error("Failed to transmit UAV incident payload across all gateway endpoints.")
+            logger.error(f"Failed to transmit UAV incident payload across all gateway endpoints after {max_attempts} attempts.")
 
     def stop(self):
         """Deterministic resource release."""
@@ -428,7 +474,7 @@ def main():
     )
     parser.add_argument(
         "-b", "--backend-url",
-        default=os.getenv("BACKEND_WEBHOOK_URL", "http://localhost:9443/api/webhook/incident"),
+        default=os.getenv("BACKEND_WEBHOOK_URL", "http://backend:8000/api/webhook/incident"),
         help="Central EOC Backend webhook URL",
     )
     parser.add_argument(

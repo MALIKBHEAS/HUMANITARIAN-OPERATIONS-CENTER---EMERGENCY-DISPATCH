@@ -473,33 +473,51 @@ class VisionStreamWorker:
         ).start()
 
     def _send_dispatch_request(self, payload: dict):
-        """Sends HTTP POST to EOC backend webhook with resilient fallback."""
+        """Sends HTTP POST to EOC backend webhook with resilient fallback, retries, and internal Docker routing."""
+        # 1. Resolve candidate gateways with priority on Docker internal service networking
+        configured_url = (self.backend_webhook_url or "").strip()
         candidate_urls = [
-            self.backend_webhook_url,
             "http://backend:8000/api/webhook/incident",
-            "http://localhost:9443/api/webhook/incident",
-            "http://127.0.0.1:9443/api/webhook/incident",
+            "http://eoa-backend-api:8000/api/webhook/incident",
         ]
-        unique_urls = list(dict.fromkeys(candidate_urls))
+        if configured_url:
+            # If configured URL is using internal or custom target, place alongside primary
+            if "localhost" not in configured_url and "127.0.0.1" not in configured_url:
+                candidate_urls.insert(0, configured_url)
+            else:
+                candidate_urls.append(configured_url)
 
+        # Fallback candidates for host-gateway and bare-metal environments
+        candidate_urls.extend([
+            "http://host.docker.internal:8000/api/webhook/incident",
+            "http://host.docker.internal:9443/api/webhook/incident",
+            "http://localhost:8000/api/webhook/incident",
+            "http://localhost:9443/api/webhook/incident",
+            "http://127.0.0.1:8000/api/webhook/incident",
+            "http://127.0.0.1:9443/api/webhook/incident",
+        ])
+        unique_urls = list(dict.fromkeys([u for u in candidate_urls if u]))
+
+        # 2. Generate cryptographically signed Bearer JWT with COMMANDER role
         headers = {"Content-Type": "application/json"}
+        secret = os.getenv("SECRET_KEY", "eoa-enterprise-super-secret-key-change-in-production-2026-global")
+        service_token = None
         try:
-            secret = os.getenv("SECRET_KEY", "eoa-enterprise-super-secret-key-change-in-production-2026-global")
+            import jwt
+            service_token = jwt.encode(
+                {
+                    "sub": "ai-vision-worker@eoa.mil",
+                    "role": "COMMANDER",
+                    "tenant_id": "eoa-global-hq",
+                    "name": "Autonomous AI Vision Worker",
+                    "iat": int(time.time()),
+                    "exp": int(time.time()) + 86400 * 365,
+                },
+                secret,
+                algorithm="HS256",
+            )
+        except Exception:
             try:
-                import jwt
-                service_token = jwt.encode(
-                    {
-                        "sub": "ai-vision-worker@eoa.mil",
-                        "role": "COMMANDER",
-                        "tenant_id": "eoa-global-hq",
-                        "name": "Autonomous AI Vision Worker",
-                        "iat": int(time.time()),
-                        "exp": int(time.time()) + 86400 * 365,
-                    },
-                    secret,
-                    algorithm="HS256",
-                )
-            except ImportError:
                 import base64
                 import hashlib
                 import hmac
@@ -515,26 +533,50 @@ class VisionStreamWorker:
                 sig = hmac.new(secret.encode(), f"{hdr}.{pld}".encode(), hashlib.sha256).digest()
                 b64_sig = base64.urlsafe_b64encode(sig).decode().rstrip("=")
                 service_token = f"{hdr}.{pld}.{b64_sig}"
+            except Exception as sig_err:
+                logger.error(f"Failed to generate service JWT token: {sig_err}")
+
+        if service_token:
             headers["Authorization"] = f"Bearer {service_token}"
-        except Exception as tok_err:
-            logger.debug(f"Service token generation blip: {tok_err}")
 
-        for url in unique_urls:
-            try:
-                logger.info(f"Transmitting vision dispatch from [{self.stream_id}] to Gateway: {url}")
-                res = requests.post(url, json=payload, headers=headers, timeout=4.0)
-                if res.status_code in [200, 201, 202]:
-                    resp_data = res.json()
-                    logger.info(f"Dispatch CONFIRMED for [{self.stream_id}]: {resp_data.get('incident_id') or resp_data.get('id')}")
-                    with self._lock:
-                        self._last_dispatch_data = resp_data
-                    return
-                else:
-                    logger.warning(f"Gateway status {res.status_code} for [{self.stream_id}] on {url}: {res.text}")
-            except Exception as net_err:
-                logger.debug(f"Candidate {url} blip: {net_err}")
+        # 3. Resilient dispatch transmission with multi-attempt retry loop and extended timeout
+        max_attempts = 3
+        timeout_seconds = 8.0
 
-        logger.error(f"Failed to transmit vision dispatch for [{self.stream_id}] across candidate gateways.")
+        for attempt in range(1, max_attempts + 1):
+            for url in unique_urls:
+                try:
+                    logger.info(
+                        f"Transmitting vision dispatch from [{self.stream_id}] "
+                        f"(attempt {attempt}/{max_attempts}) to Gateway: {url}"
+                    )
+                    res = requests.post(url, json=payload, headers=headers, timeout=timeout_seconds)
+                    if res.status_code in [200, 201, 202]:
+                        resp_data = res.json()
+                        inc_ref = resp_data.get("incident_id") or resp_data.get("id") or "CONFIRMED"
+                        logger.info(
+                            f"Dispatch CONFIRMED for [{self.stream_id}] via {url}: Incident ID [{inc_ref}]"
+                        )
+                        with self._lock:
+                            self._last_dispatch_data = resp_data
+                            self._total_dispatches += 1
+                        return
+                    elif res.status_code == 401:
+                        logger.warning(
+                            f"Gateway 401 Unauthorized for [{self.stream_id}] on {url}: {res.text}. "
+                            f"Verify SECRET_KEY synchronization."
+                        )
+                    else:
+                        logger.warning(f"Gateway status {res.status_code} for [{self.stream_id}] on {url}: {res.text}")
+                except Exception as net_err:
+                    logger.debug(f"Candidate {url} (attempt {attempt}) connection blip: {net_err}")
+
+            if attempt < max_attempts:
+                time.sleep(1.0 * attempt)
+
+        logger.error(
+            f"Failed to transmit vision dispatch for [{self.stream_id}] across candidate gateways after {max_attempts} attempts."
+        )
 
     def generate_mjpeg_stream(self) -> Generator[bytes, None, None]:
         """Yields multipart/x-mixed-replace JPEG boundary stream."""
